@@ -194,19 +194,25 @@
         
         // --- NEW: Local Database Sync ---
         async function syncLocalDatabase() {
-            // This URL points to a stable, long-term location for the card data.
-            const dataUrl = 'https://api.jsonbin.io/v3/b/66a2d216e41b4d34e4104664/latest';
+            // This URL points to a new, stable, long-term location for the card data.
+            const dataUrl = 'https://api.jsonbin.io/v3/b/66a2f7cbe41b4d34e4107872/latest';
+            const accessKey = '$2a$10$s7v2M.d8B.UuL8.vN6jD9e7kH7cI2q5r3S0g.Qp6w.Wz8j8u3yY.';
             try {
                 statusDisplay.textContent = 'SYNCING DATABASE...';
-                const response = await fetch(dataUrl, { headers: { 'X-Access-Key': '$2a$10$3g.gSpTj9d4D9Am3Psm2n.0un5tHdiG5zXyT5yJqB8L.IQjUnlS.K' }});
-                if (!response.ok) throw new Error('Failed to download database');
+                const response = await fetch(dataUrl, { headers: { 'X-Access-Key': accessKey }});
+                if (!response.ok) {
+                    throw new Error(`Network response was not ok. Status: ${response.status}`);
+                }
                 const data = await response.json();
+                 if (!data.record) {
+                    throw new Error("Downloaded data is not in the expected format.");
+                }
                 localCardDatabase = data.record;
                 statusDisplay.textContent = 'DATABASE SYNCED. READY!';
                 setTimeout(() => { statusDisplay.textContent = '' }, 2000);
             } catch (error) {
                 console.error('Database sync failed:', error);
-                statusDisplay.textContent = 'DATABASE SYNC FAILED!';
+                statusDisplay.textContent = `DB SYNC FAILED: ${error.message}`;
             }
         }
 
