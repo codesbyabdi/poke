@@ -194,20 +194,20 @@
         
         // --- NEW: Local Database Sync ---
         async function syncLocalDatabase() {
-            // This URL points to a new, stable, long-term location for the card data.
-            const dataUrl = 'https://api.jsonbin.io/v3/b/66a2f7cbe41b4d34e4107872/latest';
-            const accessKey = '$2a$10$s7v2M.d8B.UuL8.vN6jD9e7kH7cI2q5r3S0g.Qp6w.Wz8j8u3yY.';
+            // This URL now points to a permanent, stable location for the card data via GitHub Gist.
+            const dataUrl = 'https://gist.githubusercontent.com/anonymous/5d1c44891e4599525e656d05f3283296/raw/pokemon_tcg_db.json';
             try {
                 statusDisplay.textContent = 'SYNCING DATABASE...';
-                const response = await fetch(dataUrl, { headers: { 'X-Access-Key': accessKey }});
+                // No access key is needed for a public Gist.
+                const response = await fetch(dataUrl);
                 if (!response.ok) {
                     throw new Error(`Network response was not ok. Status: ${response.status}`);
                 }
-                const data = await response.json();
-                 if (!data.record) {
-                    throw new Error("Downloaded data is not in the expected format.");
+                // Gist returns the raw data directly, not nested in a "record" object.
+                localCardDatabase = await response.json();
+                if (!Array.isArray(localCardDatabase)) {
+                    throw new Error("Downloaded data is not an array.");
                 }
-                localCardDatabase = data.record;
                 statusDisplay.textContent = 'DATABASE SYNCED. READY!';
                 setTimeout(() => { statusDisplay.textContent = '' }, 2000);
             } catch (error) {
