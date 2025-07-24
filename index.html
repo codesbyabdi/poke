@@ -194,13 +194,11 @@
         
         // --- NEW: Local Database Sync ---
         async function syncLocalDatabase() {
-            // In a real-world app, you'd fetch this from a URL.
-            // For this demo, we embed a small subset of the data.
-            // This is the core of the new, faster architecture.
-            const dataUrl = 'https://api.jsonbin.io/v3/b/66a17b0ee41b4d34e40f316a';
+            // This URL points to a stable, long-term location for the card data.
+            const dataUrl = 'https://api.jsonbin.io/v3/b/66a2d216e41b4d34e4104664/latest';
             try {
                 statusDisplay.textContent = 'SYNCING DATABASE...';
-                const response = await fetch(dataUrl);
+                const response = await fetch(dataUrl, { headers: { 'X-Access-Key': '$2a$10$3g.gSpTj9d4D9Am3Psm2n.0un5tHdiG5zXyT5yJqB8L.IQjUnlS.K' }});
                 if (!response.ok) throw new Error('Failed to download database');
                 const data = await response.json();
                 localCardDatabase = data.record;
@@ -245,7 +243,6 @@
                 results = localCardDatabase.filter(card => card.name.toLowerCase().includes(lowerCaseQuery));
             }
 
-            // To make results relevant, let's group by name and take the first one
             const uniqueResults = Array.from(new Map(results.map(card => [card.name, card])).values());
             
             lastDisplayedCards = uniqueResults.slice(0, 18);
@@ -298,7 +295,6 @@
             const img = cardElement.querySelector('.card-image');
             const imageContainer = cardElement.querySelector('.img-placeholder');
 
-            // Progressive image loading
             if(img && imageContainer) {
                 const imageLoader = new Image();
                 imageLoader.src = card.images.small;
@@ -378,7 +374,7 @@
             logoutBtn.classList.remove('hidden');
             showListBtn.disabled = false;
             
-            await syncLocalDatabase(); // Wait for DB to load
+            await syncLocalDatabase(); 
             
             searchInput.disabled = false;
             searchInput.placeholder = "Search for a Pokémon...";
