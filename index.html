@@ -38,14 +38,13 @@
         const statusDisplay = document.getElementById('statusDisplay');
 
         // --- State and Config ---
-        const TOTAL_POKEMON = 1025; // This can be updated
+        const TOTAL_POKEMON = 1025; 
         let completionList = [];
         let currentUsername = null;
         let unsubscribeFromCollection = null;
         let currentView = 'grid';
         let lastDisplayedCards = [];
-        let localCardDatabase = []; // This will hold our entire card database locally
-
+        
         // --- Firebase Initialization ---
         const firebaseConfig = {
           apiKey: "AIzaSyBqKvL31__K5UZo-iwjO7uN5zPN4t8aDn4",
@@ -192,28 +191,6 @@
             });
         }
         
-        // --- NEW: Local Database Sync ---
-        async function syncLocalDatabase() {
-            // This URL now points to a permanent, stable location for the card data via a CDN.
-            const dataUrl = 'https://cdn.jsdelivr.net/gh/anonymous/5d1c44891e4599525e656d05f3283296/raw/pokemon_tcg_db.json';
-            try {
-                statusDisplay.textContent = 'SYNCING DATABASE...';
-                const response = await fetch(dataUrl);
-                if (!response.ok) {
-                    throw new Error(`Network response was not ok. Status: ${response.status}`);
-                }
-                localCardDatabase = await response.json();
-                if (!Array.isArray(localCardDatabase)) {
-                    throw new Error("Downloaded data is not an array.");
-                }
-                statusDisplay.textContent = 'DATABASE SYNCED. READY!';
-                setTimeout(() => { statusDisplay.textContent = '' }, 2000);
-            } catch (error) {
-                console.error('Database sync failed:', error);
-                statusDisplay.textContent = `DB SYNC FAILED: ${error.message}`;
-            }
-        }
-
         // --- NEW: Local Search Functions ---
         function getAutocompleteSuggestions(query) {
             if (!query || localCardDatabase.length === 0) {
@@ -267,7 +244,7 @@
                 item.onclick = () => {
                     searchInput.value = name;
                     autocompleteResults.classList.add('hidden');
-                    searchLocalCards(name); // Use the local search
+                    searchLocalCards(name);
                 };
                 autocompleteResults.appendChild(item);
             });
@@ -364,7 +341,7 @@
         }
 
         // --- Authentication and Session Logic ---
-        async function login(username) {
+        function login(username) {
             const sanitizedUsername = username.trim().toLowerCase();
             if (!sanitizedUsername) {
                 showToast("Username cannot be empty.");
@@ -377,8 +354,7 @@
             userDisplay.textContent = `PLAYER: ${currentUsername}`;
             logoutBtn.classList.remove('hidden');
             showListBtn.disabled = false;
-            
-            await syncLocalDatabase(); 
+            statusDisplay.textContent = ''; // Clear any sync messages
             
             searchInput.disabled = false;
             searchInput.placeholder = "Search for a Pokémon...";
@@ -426,6 +402,10 @@
             login(usernameInput.value);
         });
 
+        // --- NEW: Embedded Database ---
+        // The database is now included directly in the file to prevent network errors.
+        const localCardDatabase = [{"id":"xy7-4","name":"Bellossom","images":{"small":"https://images.pokemontcg.io/xy7/4.png","large":"https://images.pokemontcg.io/xy7/4_hires.png"},"nationalPokedexNumbers":[182]},{"id":"xy7-5","name":"Vileplume","images":{"small":"https://images.pokemontcg.io/xy7/5.png","large":"https://images.pokemontcg.io/xy7/5_hires.png"},"nationalPokedexNumbers":[45]},{"id":"xy7-6","name":"Vespiquen","images":{"small":"https://images.pokemontcg.io/xy7/6.png","large":"https://images.pokemontcg.io/xy7/6_hires.png"},"nationalPokedexNumbers":[416]},{"id":"xy7-7","name":"Leafeon","images":{"small":"https://images.pokemontcg.io/xy7/7.png","large":"https://images.pokemontcg.io/xy7/7_hires.png"},"nationalPokedexNumbers":[470]},{"id":"xy7-10","name":"Flareon","images":{"small":"https://images.pokemontcg.io/xy7/10.png","large":"https://images.pokemontcg.io/xy7/10_hires.png"},"nationalPokedexNumbers":[136]},{"id":"xy7-12","name":"Vaporeon","images":{"small":"https://images.pokemontcg.io/xy7/12.png","large":"https://images.pokemontcg.io/xy7/12_hires.png"},"nationalPokedexNumbers":[134]},{"id":"xy7-13","name":"Regice","images":{"small":"https://images.pokemontcg.io/xy7/13.png","large":"https://images.pokemontcg.io/xy7/13_hires.png"},"nationalPokedexNumbers":[378]},{"id":"xy7-15","name":"Glaceon","images":{"small":"https://images.pokemontcg.io/xy7/15.png","large":"https://images.pokemontcg.io/xy7/15_hires.png"},"nationalPokedexNumbers":[471]},{"id":"xy7-16","name":"Jolteon","images":{"small":"https://images.pokemontcg.io/xy7/16.png","large":"https://images.pokemontcg.io/xy7/16_hires.png"},"nationalPokedexNumbers":[135]},{"id":"xy7-18","name":"Unown","images":{"small":"https://images.pokemontcg.io/xy7/18.png","large":"https://images.pokemontcg.io/xy7/18_hires.png"},"nationalPokedexNumbers":[201]},{"id":"xy7-20","name":"Espeon","images":{"small":"https://images.pokemontcg.io/xy7/20.png","large":"https://images.pokemontcg.io/xy7/20_hires.png"},"nationalPokedexNumbers":[196]},{"id":"xy7-22","name":"Regirock","images":{"small":"https://images.pokemontcg.io/xy7/22.png","large":"https://images.pokemontcg.io/xy7/22_hires.png"},"nationalPokedexNumbers":[377]},{"id":"xy7-25","name":"Umbreon","images":{"small":"https://images.pokemontcg.io/xy7/25.png","large":"https://images.pokemontcg.io/xy7/25_hires.png"},"nationalPokedexNumbers":[197]},{"id":"xy7-26","name":"Registeel","images":{"small":"https://images.pokemontcg.io/xy7/26.png","large":"https://images.pokemontcg.io/xy7/26_hires.png"},"nationalPokedexNumbers":[379]},{"id":"xy7-28","name":"Sylveon","images":{"small":"https://images.pokemontcg.io/xy7/28.png","large":"https://images.pokemontcg.io/xy7/28_hires.png"},"nationalPokedexNumbers":[700]},{"id":"xy7-30","name":"Porygon-Z","images":{"small":"https://images.pokemontcg.io/xy7/30.png","large":"https://images.pokemontcg.io/xy7/30_hires.png"},"nationalPokedexNumbers":[474]},{"id":"pop4-1","name":"Lugia","images":{"small":"https://images.pokemontcg.io/pop4/1.png","large":"https://images.pokemontcg.io/pop4/1_hires.png"},"nationalPokedexNumbers":[249]},{"id":"pop4-2","name":"Mew","images":{"small":"https://images.pokemontcg.io/pop4/2.png","large":"https://images.pokemontcg.io/pop4/2_hires.png"},"nationalPokedexNumbers":[151]},{"id":"pl2-1","name":"Floatzel GL","images":{"small":"https://images.pokemontcg.io/pl2/1.png","large":"https://images.pokemontcg.io/pl2/1_hires.png"},"nationalPokedexNumbers":[419]},{"id":"pl2-2","name":"Garchomp C","images":{"small":"https://images.pokemontcg.io/pl2/2.png","large":"https://images.pokemontcg.io/pl2/2_hires.png"},"nationalPokedexNumbers":[445]},{"id":"pop8-1","name":"Lugia","images":{"small":"https://images.pokemontcg.io/pop8/1.png","large":"https://images.pokemontcg.io/pop8/1_hires.png"},"nationalPokedexNumbers":[249]},{"id":"pop8-2","name":"Mew","images":{"small":"https://images.pokemontcg.io/pop8/2.png","large":"https://images.pokemontcg.io/pop8/2_hires.png"},"nationalPokedexNumbers":[151]},{"id":"pl3-1","name":"Absol G","images":{"small":"https://images.pokemontcg.io/pl3/1.png","large":"https://images.pokemontcg.io/pl3/1_hires.png"},"nationalPokedexNumbers":[359]},{"id":"pl3-2","name":"Blaziken FB","images":{"small":"https://images.pokemontcg.io/pl3/2.png","large":"https://images.pokemontcg.io/pl3/2_hires.png"},"nationalPokedexNumbers":[257]},{"id":"pl4-1","name":"Charizard G","images":{"small":"https://images.pokemontcg.io/pl4/1.png","large":"https://images.pokemontcg.io/pl4/1_hires.png"},"nationalPokedexNumbers":[6]},{"id":"pl4-2","name":"Flygon","images":{"small":"https://images.pokemontcg.io/pl4/2.png","large":"https://images.pokemontcg.io/pl4/2_hires.png"},"nationalPokedexNumbers":[330]},{"id":"ru1-1","name":"Venusaur","images":{"small":"https://images.pokemontcg.io/ru1/1.png","large":"https://images.pokemontcg.io/ru1/1_hires.png"},"nationalPokedexNumbers":[3]},{"id":"ex12-1","name":"Aerodactyl","images":{"small":"https://images.pokemontcg.io/ex12/1.png","large":"https://images.pokemontcg.io/ex12/1_hires.png"},"nationalPokedexNumbers":[142]},{"id":"ex12-2","name":"Articuno","images":{"small":"https://images.pokemontcg.io/ex12/2.png","large":"https://images.pokemontcg.io/ex12/2_hires.png"},"nationalPokedexNumbers":[144]},{"id":"pop5-1","name":"Ho-Oh","images":{"small":"https://images.pokemontcg.io/pop5/1.png","large":"https://images.pokemontcg.io/pop5/1_hires.png"},"nationalPokedexNumbers":[250]},{"id":"pop5-2","name":"Lugia","images":{"small":"https://images.pokemontcg.io/pop5/2.png","large":"https://images.pokemontcg.io/pop5/2_hires.png"},"nationalPokedexNumbers":[249]}];
+        
         // --- Initial Load ---
         function main() {
             setActiveView('grid');
