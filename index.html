@@ -42,7 +42,11 @@
         const toggleAuthMode = document.getElementById('toggleAuthMode');
         const autocompleteResults = document.getElementById('autocomplete-results');
         const statusDisplay = document.getElementById('statusDisplay');
-        const closeListBtn = document.getElementById('closeListBtn'); // New reference for the close button
+        const closeListBtn = document.getElementById('closeListBtn');
+        const sortPokedexAscBtn = document.getElementById('sortPokedexAscBtn');
+        const sortPokedexDescBtn = document.getElementById('sortPokedexDescBtn');
+        const sortNameAscBtn = document.getElementById('sortNameAscBtn');
+        const sortNameDescBtn = document.getElementById('sortNameDescBtn');
 
 
         // --- State and Config ---
@@ -54,6 +58,7 @@
         let lastDisplayedCards = [];
         let localCardDatabase = [];
         let isRegistering = false;
+        let currentSort = { field: 'pokedex', direction: 'asc' };
 
         // --- Firebase Initialization ---
         const firebaseConfig = {
@@ -190,13 +195,38 @@
             }
         }
 
+        // --- "My List" Sorting and Rendering ---
+        function setSort(field, direction) {
+            currentSort = { field, direction };
+            renderCompletionList();
+        }
+
         function renderCompletionList() {
             myListContainer.innerHTML = '';
+            
+            // Update active state on sort buttons
+            [sortPokedexAscBtn, sortPokedexDescBtn, sortNameAscBtn, sortNameDescBtn].forEach(btn => btn.classList.remove('game-btn-active'));
+            if(currentSort.field === 'pokedex' && currentSort.direction === 'asc') sortPokedexAscBtn.classList.add('game-btn-active');
+            if(currentSort.field === 'pokedex' && currentSort.direction === 'desc') sortPokedexDescBtn.classList.add('game-btn-active');
+            if(currentSort.field === 'name' && currentSort.direction === 'asc') sortNameAscBtn.classList.add('game-btn-active');
+            if(currentSort.field === 'name' && currentSort.direction === 'desc') sortNameDescBtn.classList.add('game-btn-active');
+            
             if (completionList.length === 0) {
                 myListContainer.innerHTML = `<div class="text-center p-4 text-gray-500">Your list is empty...</div>`;
                 return;
             }
-            const sortedList = [...completionList].sort((a, b) => a.pokedex - b.pokedex || a.name.localeCompare(b.name));
+
+            // Create a sorted copy of the list for rendering
+            const sortedList = [...completionList].sort((a, b) => {
+                if (currentSort.field === 'pokedex') {
+                    return currentSort.direction === 'asc' ? a.pokedex - b.pokedex : b.pokedex - a.pokedex;
+                }
+                if (currentSort.field === 'name') {
+                    return currentSort.direction === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
+                }
+                return 0;
+            });
+            
             sortedList.forEach(item => {
                 const listItem = document.createElement('div');
                 listItem.className = 'flex items-center justify-between p-2 bg-white border-2 border-black';
@@ -205,11 +235,21 @@
                         <img src="${item.image}" alt="${item.name}" class="w-10 h-14 object-cover border-2 border-black">
                         <div>
                             <p class="font-bold text-sm">${item.name}</p>
-                            <p class="text-xs text-gray-500">#${String(item.pokedex).padStart(3, '0')}</p>
+                            <p class="pokedex-link text-xs text-gray-500 cursor-pointer hover:underline">#${String(item.pokedex).padStart(3, '0')}</p>
                         </div>
                     </div>
                     <button class="remove-btn text-red-500 hover:text-red-700 text-2xl">[X]</button>`;
+                
+                // Event listener for removing item
                 listItem.querySelector('.remove-btn').onclick = () => removeFromList(item.id);
+                
+                // Event listener for clickable pokedex number
+                listItem.querySelector('.pokedex-link').onclick = () => {
+                    toggleListPanel(false);
+                    searchInput.value = item.pokedex;
+                    searchLocalDatabase(String(item.pokedex));
+                };
+
                 myListContainer.appendChild(listItem);
             });
         }
@@ -230,7 +270,6 @@
                 }
             }
 
-            // !!! ACTION REQUIRED: REPLACE THIS URL WITH THE 'RAW' URL FROM YOUR GITHUB REPO !!!
             const dataUrl = 'https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/pokemon-tcg-db.json';
 
             try {
@@ -489,12 +528,17 @@
         document.addEventListener('keydown', e => e.key === 'Escape' && !imageModal.classList.contains('hidden') && imageModal.classList.add('hidden'));
         showListBtn.addEventListener('click', () => toggleListPanel(true));
         panelOverlay.addEventListener('click', () => toggleListPanel(false));
-        closeListBtn.addEventListener('click', () => toggleListPanel(false)); // New event listener for close button
+        closeListBtn.addEventListener('click', () => toggleListPanel(false));
         gridViewBtn.addEventListener('click', () => setActiveView('grid'));
         listViewBtn.addEventListener('click', () => setActiveView('list'));
         logoutBtn.addEventListener('click', () => signOut(auth));
         loginForm.addEventListener('submit', handleAuthForm);
         toggleAuthMode.addEventListener('click', () => setAuthMode(!isRegistering));
+        sortPokedexAscBtn.addEventListener('click', () => setSort('pokedex', 'asc'));
+        sortPokedexDescBtn.addEventListener('click', () => setSort('pokedex', 'desc'));
+        sortNameAscBtn.addEventListener('click', () => setSort('name', 'asc'));
+        sortNameDescBtn.addEventListener('click', () => setSort('name', 'desc'));
+
 
         // --- Initial Load ---
         function main() {
@@ -638,9 +682,23 @@
 
     <div id="panel-overlay" class="fixed inset-0 bg-black/30 z-30 hidden"></div>
     <aside id="myListPanel" class="fixed top-0 right-0 h-full w-full max-w-md p-6 z-40 flex flex-col">
-        <div class="flex justify-between items-center mb-6 pb-4 border-b-4 border-black">
-            <h2 class="text-2xl font-bold">MY LIST</h2>
-            <button id="closeListBtn" class="text-gray-600 hover:text-black transition-colors text-3xl">[X]</button>
+        <div class="flex-shrink-0">
+            <div class="flex justify-between items-center mb-2">
+                <h2 class="text-2xl font-bold">MY LIST</h2>
+                <button id="closeListBtn" class="text-gray-600 hover:text-black transition-colors text-3xl">[X]</button>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-xs border-y-2 border-black py-2 mb-4">
+                <div class="flex items-center gap-2">
+                    <span class="font-bold">#</span>
+                    <button id="sortPokedexAscBtn" title="Sort by Number Ascending" class="sort-btn game-btn p-1 border-2">▲</button>
+                    <button id="sortPokedexDescBtn" title="Sort by Number Descending" class="sort-btn game-btn p-1 border-2">▼</button>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="font-bold">NAME</span>
+                    <button id="sortNameAscBtn" title="Sort by Name Ascending" class="sort-btn game-btn p-1 border-2">▲</button>
+                    <button id="sortNameDescBtn" title="Sort by Name Descending" class="sort-btn game-btn p-1 border-2">▼</button>
+                </div>
+            </div>
         </div>
         <div id="myListContainer" class="flex-grow overflow-y-auto pr-2 space-y-4"></div>
     </aside>
