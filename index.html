@@ -100,9 +100,14 @@
                 updateProgress();
                 if (myListPanel.classList.contains('open')) renderCompletionList();
                 
-                const currentQuery = searchInput.value.trim();
-                if (document.querySelector('#results > div')) {
-                    searchCards(currentQuery, false); 
+                // If there are cards on screen, update their buttons without a full search
+                const displayedCardButtons = document.querySelectorAll('.card-btn[data-pokedex]');
+                if (displayedCardButtons.length > 0) {
+                    displayedCardButtons.forEach(button => {
+                        const pokedexNumber = parseInt(button.dataset.pokedex, 10);
+                        const isCollected = completionList.some(item => item.pokedex === pokedexNumber);
+                        updateCardButton(pokedexNumber, isCollected);
+                    });
                 }
             }, (error) => {
                 console.error("Error listening to collection:", error);
@@ -185,7 +190,10 @@
         
         // --- API & Search Functions ---
         async function searchCards(query, showLoader = true) {
-            if (!query) return;
+            if (!query) {
+                resultsContainer.innerHTML = ''; // Clear results if query is empty
+                return;
+            }
             if (showLoader) toggleLoader(true);
 
             const isPokedexNumber = /^\d+$/.test(query);
@@ -208,20 +216,49 @@
         }
 
         function displayCards(cards) {
-            if(cards.length === 0) {
+            resultsContainer.innerHTML = ''; // Clear previous results or placeholders
+            if (cards.length === 0) {
                 showMessage(`No cards found for "${searchInput.value.trim()}".`);
                 return;
             }
-            resultsContainer.innerHTML = '';
+            
             cards.forEach((card) => {
                 const pokedexNumber = card.nationalPokedexNumbers?.[0];
                 const isCollected = pokedexNumber ? completionList.some(item => item.pokedex === pokedexNumber) : false;
                 
                 const cardElement = document.createElement('div');
                 cardElement.className = 'text-center';
-                cardElement.innerHTML = `
-                    <img src="${card.images.small}" alt="${card.name}" class="w-full border-4 border-black cursor-pointer hover:border-blue-500 transition-colors" loading="lazy">
-                    <div class="mt-2 text-xs"><p class="font-bold truncate">${card.name}</p></div>`;
+                
+                // Image container with placeholder
+                const imageContainer = document.createElement('div');
+                imageContainer.className = 'img-placeholder';
+
+                const img = document.createElement('img');
+                img.alt = card.name;
+                img.className = 'w-full border-4 border-black cursor-pointer opacity-0 transition-opacity duration-500'; // Start transparent
+                img.loading = 'lazy'; // Still good practice
+
+                imageContainer.appendChild(img);
+
+                // Progressive image loading
+                const imageLoader = new Image();
+                imageLoader.src = card.images.small;
+                imageLoader.onload = () => {
+                    img.src = imageLoader.src;
+                    img.classList.remove('opacity-0'); // Fade in
+                    imageContainer.classList.remove('img-placeholder'); // Remove placeholder background
+                };
+                imageLoader.onerror = () => {
+                     // Handle image loading errors if needed
+                    imageContainer.innerHTML = `<div class="w-full h-full flex items-center justify-center text-xs text-center p-2">Image not found</div>`;
+                };
+
+                const cardInfo = document.createElement('div');
+                cardInfo.className = 'mt-2 text-xs';
+                cardInfo.innerHTML = `<p class="font-bold truncate">${card.name}</p>`;
+
+                cardElement.appendChild(imageContainer);
+                cardElement.appendChild(cardInfo);
                 
                 if (pokedexNumber) {
                     const addButton = document.createElement('button');
@@ -231,10 +268,11 @@
                     addButton.onclick = () => addToList(card);
                 }
                 
-                cardElement.querySelector('img').addEventListener('click', () => {
+                img.addEventListener('click', () => {
                     modalImage.src = card.images.large;
                     imageModal.classList.remove('hidden');
                 });
+
                 resultsContainer.appendChild(cardElement);
             });
         }
@@ -267,7 +305,7 @@
         }
 
         // --- Event Listeners ---
-        searchInput.addEventListener('keyup', e => debounceSearch(e.target.value.trim()));
+        searchInput.addEventListener('input', e => debounceSearch(e.target.value.trim()));
         closeModalButton.addEventListener('click', () => imageModal.classList.add('hidden'));
         document.addEventListener('keydown', e => e.key === 'Escape' && !imageModal.classList.contains('hidden') && imageModal.classList.add('hidden'));
         showListBtn.addEventListener('click', () => toggleListPanel(true));
@@ -310,6 +348,18 @@
         #myListPanel { border-left: 4px solid #212121; background-color: #f0f0f0; transition: transform 0.4s ease-in-out; transform: translateX(100%); }
         #myListPanel.open { transform: translateX(0); }
         #panel-overlay { transition: opacity 0.4s ease-in-out; backdrop-filter: blur(2px); }
+        
+        /* New styles for progressive image loading */
+        .img-placeholder {
+            width: 100%;
+            aspect-ratio: 245 / 342; /* Standard Pokémon card aspect ratio */
+            background-color: #d1d5db; /* gray-300 */
+            border: 4px solid #212121;
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            50% { opacity: .5; }
+        }
     </style>
 </head>
 <body class="antialiased">
