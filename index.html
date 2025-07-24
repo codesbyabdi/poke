@@ -16,7 +16,6 @@
 
         // --- DOM References ---
         const searchInput = document.getElementById('searchInput');
-        const searchBtn = document.getElementById('searchBtn');
         const resultsContainer = document.getElementById('results');
         const loader = document.getElementById('loader');
         const imageModal = document.getElementById('imageModal');
@@ -115,6 +114,8 @@
                 await setDoc(userDocRef, { list: completionList });
             } catch (error) {
                 console.error("Error saving collection: ", error);
+                // Provide direct feedback to the user if saving fails.
+                showToast("SAVE FAILED! Check console (F12) for errors.");
             }
         }
 
@@ -132,6 +133,9 @@
                     const isCollected = completionList.some(item => item.pokedex === pokedexNumber);
                     updateCardButton(pokedexNumber, isCollected);
                 });
+            }, (error) => {
+                console.error("Error listening to collection:", error);
+                showToast("CONNECTION LOST! Check console (F12).");
             });
         }
 
@@ -228,13 +232,11 @@
                 return;
             }
             try {
-                // Fetch only names for suggestions, keeping the payload small
                 const response = await fetch(`${API_BASE_URL}?q=name:"${query}*"&select=name&orderBy=name&pageSize=10`, {
                     headers: { 'X-Api-Key': API_KEY }
                 });
                 if (!response.ok) throw new Error('Failed to fetch suggestions');
                 const data = await response.json();
-                // Get a unique list of names, limited to 5
                 const uniqueNames = [...new Set(data.data.map(card => card.name))].slice(0, 5);
                 suggestionCache[query] = uniqueNames;
                 displayAutocomplete(uniqueNames);
@@ -256,7 +258,6 @@
             }
             toggleLoader(true);
             try {
-                // Use the select parameter for a much smaller and faster response
                 const selectFields = 'id,name,nationalPokedexNumbers,images';
                 const response = await fetch(`${API_BASE_URL}?q=name:"${query}"&orderBy=set.releaseDate&pageSize=18&select=${selectFields}`, {
                     headers: { 'X-Api-Key': API_KEY }
