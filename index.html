@@ -210,12 +210,15 @@
 
         function toggleLoader(isLoading) {
             loader.style.display = isLoading ? 'block' : 'none';
-            if (isLoading) resultsContainer.innerHTML = '';
+            if (isLoading) {
+                resultsContainer.innerHTML = '';
+            }
         }
         
         // --- API & Search Functions with Caching ---
-        async function searchCards(query, showLoader = true) {
+        async function searchCards(query) {
             if (!query) {
+                toggleLoader(false);
                 resultsContainer.innerHTML = '';
                 lastDisplayedCards = [];
                 return;
@@ -226,8 +229,8 @@
                 displayCards(lastDisplayedCards);
                 return;
             }
-
-            if (showLoader) toggleLoader(true);
+            
+            toggleLoader(true);
 
             const isPokedexNumber = /^\d+$/.test(query);
             const apiQuery = isPokedexNumber ? `nationalPokedexNumbers:${query}` : `name:"${query}*"`;
@@ -244,7 +247,7 @@
                 console.error("API Search Error:", error);
                 showMessage('An error occurred. Try again.');
             } finally {
-                if (showLoader) toggleLoader(false);
+                toggleLoader(false);
             }
         }
 
@@ -358,35 +361,25 @@
                 updateProgress();
                 userIdDisplay.textContent = 'Sign-in required to save progress';
             }
-            if (!searchInput.value) {
-                searchInput.value = 'Pikachu';
-                searchCards(searchInput.value, true);
-            }
+            // Perform the initial search after auth state is determined
+            const initialQuery = searchInput.value || 'Pikachu';
+            searchInput.value = initialQuery;
+            searchCards(initialQuery);
         }
 
-        onAuthStateChanged(auth, handleAuthState);
-        
-        function debounceSearch(query) {
-            clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(() => {
-                searchCards(query, true);
-            }, 500);
-        }
-        
+        // --- Search Logic ---
         function forceSearch() {
             clearTimeout(searchTimeout);
             const query = searchInput.value.trim();
-            searchCards(query, true);
+            searchCards(query);
         }
 
         // --- Event Listeners ---
         searchInput.addEventListener('input', e => {
-            clearTimeout(searchTimeout); // Clear previous timer
+            clearTimeout(searchTimeout);
             const query = e.target.value.trim();
             if (query) {
-                // Show loaders immediately for better UX
-                toggleLoader(true);
-                debounceSearch(query);
+                searchTimeout = setTimeout(() => searchCards(query), 500);
             } else {
                 // Clear everything if input is empty
                 toggleLoader(false);
@@ -417,6 +410,7 @@
                 handleAuthState(null);
             }
             setActiveView('grid');
+            onAuthStateChanged(auth, handleAuthState);
         }
 
         main();
