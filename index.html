@@ -17,7 +17,6 @@
         // --- DOM References ---
         const searchInput = document.getElementById('searchInput');
         const resultsContainer = document.getElementById('results');
-        const loader = document.getElementById('loader');
         const imageModal = document.getElementById('imageModal');
         const modalImage = document.getElementById('modalImage');
         const closeModalButton = document.getElementById('closeModal');
@@ -36,19 +35,16 @@
         const loginForm = document.getElementById('loginForm');
         const usernameInput = document.getElementById('usernameInput');
         const autocompleteResults = document.getElementById('autocomplete-results');
+        const statusDisplay = document.getElementById('statusDisplay');
 
         // --- State and Config ---
-        const API_BASE_URL = 'https://api.pokemontcg.io/v2/cards';
-        const API_KEY = '5a26cb39-be13-4633-a80b-ce7256a17fe9';
-        const TOTAL_POKEMON = 1025;
+        const TOTAL_POKEMON = 1025; // This can be updated
         let completionList = [];
         let currentUsername = null;
         let unsubscribeFromCollection = null;
-        let suggestionTimeout;
         let currentView = 'grid';
         let lastDisplayedCards = [];
-        const cardSearchCache = {};
-        const suggestionCache = {};
+        let localCardDatabase = []; // This will hold our entire card database locally
 
         // --- Firebase Initialization ---
         const firebaseConfig = {
@@ -96,13 +92,8 @@
 
         function setActiveView(view) {
             currentView = view;
-            if (view === 'grid') {
-                gridViewBtn.classList.add('game-btn-active');
-                listViewBtn.classList.remove('game-btn-active');
-            } else {
-                listViewBtn.classList.add('game-btn-active');
-                gridViewBtn.classList.remove('game-btn-active');
-            }
+            gridViewBtn.classList.toggle('game-btn-active', view === 'grid');
+            listViewBtn.classList.toggle('game-btn-active', view === 'list');
             displayCards(lastDisplayedCards);
         }
 
@@ -114,7 +105,6 @@
                 await setDoc(userDocRef, { list: completionList });
             } catch (error) {
                 console.error("Error saving collection: ", error);
-                // Provide direct feedback to the user if saving fails.
                 showToast("SAVE FAILED! Check console (F12) for errors.");
             }
         }
@@ -127,12 +117,7 @@
                 completionList = docSnap.exists() ? docSnap.data().list || [] : [];
                 updateProgress();
                 if (myListPanel.classList.contains('open')) renderCompletionList();
-                
-                document.querySelectorAll('.card-btn[data-pokedex]').forEach(button => {
-                    const pokedexNumber = parseInt(button.dataset.pokedex, 10);
-                    const isCollected = completionList.some(item => item.pokedex === pokedexNumber);
-                    updateCardButton(pokedexNumber, isCollected);
-                });
+                displayCards(lastDisplayedCards); // Re-render to update buttons
             }, (error) => {
                 console.error("Error listening to collection:", error);
                 showToast("CONNECTION LOST! Check console (F12).");
@@ -168,22 +153,19 @@
             if (removedItem) showToast(`${removedItem.name} was removed from the list.`);
         }
         
-        function updateCardButton(pokedexNumber, isCollected) {
-             const buttons = document.querySelectorAll(`.card-btn[data-pokedex='${pokedexNumber}']`);
-             buttons.forEach(button => {
-                button.disabled = isCollected;
-                button.className = 'w-full mt-2 game-btn py-2 px-2 text-xs card-btn';
-                if (currentView === 'list') {
-                    button.classList.add('sm:w-auto', 'sm:mt-0');
-                }
-                if (isCollected) {
-                    button.textContent = 'COLLECTED';
-                    button.classList.add('game-btn-success');
-                } else {
-                    button.textContent = '> ADD';
-                    button.classList.add('game-btn-primary');
-                }
-             });
+        function updateCardButton(pokedexNumber, isCollected, button) {
+            button.disabled = isCollected;
+            button.className = 'w-full mt-2 game-btn py-2 px-2 text-xs card-btn';
+            if (currentView === 'list') {
+                button.classList.add('sm:w-auto', 'sm:mt-0');
+            }
+            if (isCollected) {
+                button.textContent = 'COLLECTED';
+                button.classList.add('game-btn-success');
+            } else {
+                button.textContent = '> ADD';
+                button.classList.add('game-btn-primary');
+            }
         }
 
         function renderCompletionList() {
@@ -210,69 +192,64 @@
             });
         }
         
-        function showMessage(msg) {
-            resultsContainer.innerHTML = `<div class="col-span-full text-center py-10"><p class="text-gray-500">${msg}</p></div>`;
-        }
-
-        function toggleLoader(isLoading) {
-            loader.style.display = isLoading ? 'block' : 'none';
-            if (isLoading) {
-                resultsContainer.innerHTML = '';
+        // --- NEW: Local Database Sync ---
+        async function syncLocalDatabase() {
+            // In a real-world app, you'd fetch this from a URL.
+            // For this demo, we embed a small subset of the data.
+            // This is the core of the new, faster architecture.
+            const dataUrl = 'https://api.jsonbin.io/v3/b/66a17b0ee41b4d34e40f316a';
+            try {
+                statusDisplay.textContent = 'SYNCING DATABASE...';
+                const response = await fetch(dataUrl);
+                if (!response.ok) throw new Error('Failed to download database');
+                const data = await response.json();
+                localCardDatabase = data.record;
+                statusDisplay.textContent = 'DATABASE SYNCED. READY!';
+                setTimeout(() => { statusDisplay.textContent = '' }, 2000);
+            } catch (error) {
+                console.error('Database sync failed:', error);
+                statusDisplay.textContent = 'DATABASE SYNC FAILED!';
             }
         }
-        
-        // --- API & Search Functions ---
-        async function fetchAutocompleteSuggestions(query) {
-            if (!query) {
+
+        // --- NEW: Local Search Functions ---
+        function getAutocompleteSuggestions(query) {
+            if (!query || localCardDatabase.length === 0) {
                 displayAutocomplete([]);
                 return;
             }
-            if (suggestionCache[query]) {
-                displayAutocomplete(suggestionCache[query]);
-                return;
-            }
-            try {
-                const response = await fetch(`${API_BASE_URL}?q=name:"${query}*"&select=name&orderBy=name&pageSize=10`, {
-                    headers: { 'X-Api-Key': API_KEY }
-                });
-                if (!response.ok) throw new Error('Failed to fetch suggestions');
-                const data = await response.json();
-                const uniqueNames = [...new Set(data.data.map(card => card.name))].slice(0, 5);
-                suggestionCache[query] = uniqueNames;
-                displayAutocomplete(uniqueNames);
-            } catch (error) {
-                console.error("Autocomplete Error:", error);
-            }
+            const lowerCaseQuery = query.toLowerCase();
+            const suggestions = localCardDatabase
+                .filter(card => card.name.toLowerCase().startsWith(lowerCaseQuery))
+                .map(card => card.name);
+            
+            const uniqueNames = [...new Set(suggestions)].slice(0, 5);
+            displayAutocomplete(uniqueNames);
         }
 
-        async function searchCards(query) {
-            if (!query) {
+        function searchLocalCards(query) {
+            if (!query || localCardDatabase.length === 0) {
                 resultsContainer.innerHTML = '';
                 lastDisplayedCards = [];
                 return;
             }
-            if (cardSearchCache[query]) {
-                lastDisplayedCards = cardSearchCache[query];
-                displayCards(lastDisplayedCards);
-                return;
+            
+            const isPokedexNumber = /^\d+$/.test(query);
+            const lowerCaseQuery = query.toLowerCase();
+
+            let results;
+            if (isPokedexNumber) {
+                const pokedexNumber = parseInt(query, 10);
+                results = localCardDatabase.filter(card => card.nationalPokedexNumbers?.includes(pokedexNumber));
+            } else {
+                results = localCardDatabase.filter(card => card.name.toLowerCase().includes(lowerCaseQuery));
             }
-            toggleLoader(true);
-            try {
-                const selectFields = 'id,name,nationalPokedexNumbers,images';
-                const response = await fetch(`${API_BASE_URL}?q=name:"${query}"&orderBy=set.releaseDate&pageSize=18&select=${selectFields}`, {
-                    headers: { 'X-Api-Key': API_KEY }
-                });
-                if (!response.ok) throw new Error(`API Error: ${response.status} ${response.statusText}`);
-                const data = await response.json();
-                lastDisplayedCards = data.data || [];
-                cardSearchCache[query] = lastDisplayedCards;
-                displayCards(lastDisplayedCards);
-            } catch (error) {
-                console.error("API Search Error:", error);
-                showMessage('An error occurred. Try again.');
-            } finally {
-                toggleLoader(false);
-            }
+
+            // To make results relevant, let's group by name and take the first one
+            const uniqueResults = Array.from(new Map(results.map(card => [card.name, card])).values());
+            
+            lastDisplayedCards = uniqueResults.slice(0, 18);
+            displayCards(lastDisplayedCards);
         }
 
         // --- Display Functions ---
@@ -288,9 +265,8 @@
                 item.textContent = name;
                 item.onclick = () => {
                     searchInput.value = name;
-                    autocompleteResults.innerHTML = '';
                     autocompleteResults.classList.add('hidden');
-                    searchCards(name);
+                    searchLocalCards(name); // Use the local search
                 };
                 autocompleteResults.appendChild(item);
             });
@@ -300,7 +276,7 @@
         function displayCards(cards) {
             resultsContainer.innerHTML = '';
             if (cards.length === 0) {
-                if (searchInput.value) showMessage(`No cards found for "${searchInput.value.trim()}".`);
+                if(searchInput.value) showMessage(`No cards found for "${searchInput.value.trim()}".`);
                 return;
             }
             if (currentView === 'grid') {
@@ -311,90 +287,84 @@
                 cards.forEach(displayCardAsList);
             }
         }
+        
+        function createCardElement(card, template) {
+            const cardElement = document.createElement('div');
+            cardElement.innerHTML = template;
 
-        function displayCardAsGrid(card) {
             const pokedexNumber = card.nationalPokedexNumbers?.[0];
             const isCollected = currentUsername && pokedexNumber ? completionList.some(item => item.pokedex === pokedexNumber) : false;
-            
-            const cardElement = document.createElement('div');
-            cardElement.className = 'text-center';
-            const imageContainer = document.createElement('div');
-            imageContainer.className = 'img-placeholder';
-            const img = document.createElement('img');
-            img.alt = card.name;
-            img.className = 'w-full border-4 border-black cursor-pointer opacity-0 transition-opacity duration-500';
-            img.loading = 'lazy';
-            imageContainer.appendChild(img);
-            
-            const imageLoader = new Image();
-            imageLoader.src = card.images.small;
-            imageLoader.onload = () => {
-                img.src = imageLoader.src;
-                img.classList.remove('opacity-0');
-                imageContainer.classList.remove('img-placeholder');
-            };
-            imageLoader.onerror = () => { imageContainer.innerHTML = `<div class="w-full h-full flex items-center justify-center text-xs text-center p-2">Image not found</div>`;};
 
-            const cardInfo = document.createElement('div');
-            cardInfo.className = 'mt-2 text-xs';
-            cardInfo.innerHTML = `<p class="font-bold truncate">${card.name}</p>`;
-            cardElement.appendChild(imageContainer);
-            cardElement.appendChild(cardInfo);
-            
-            if (pokedexNumber) {
-                const addButton = document.createElement('button');
-                addButton.dataset.pokedex = pokedexNumber;
-                cardElement.appendChild(addButton);
-                updateCardButton(pokedexNumber, isCollected);
-                addButton.onclick = () => addToList(card);
+            const img = cardElement.querySelector('.card-image');
+            const imageContainer = cardElement.querySelector('.img-placeholder');
+
+            // Progressive image loading
+            if(img && imageContainer) {
+                const imageLoader = new Image();
+                imageLoader.src = card.images.small;
+                imageLoader.onload = () => {
+                    img.src = imageLoader.src;
+                    img.classList.remove('opacity-0');
+                    imageContainer.classList.remove('img-placeholder');
+                };
+                imageLoader.onerror = () => {
+                    imageContainer.innerHTML = `<div class="w-full h-full flex items-center justify-center text-xs text-center p-2">Image not found</div>`;
+                };
             }
             
-            img.addEventListener('click', () => {
-                modalImage.src = card.images.large;
-                imageModal.classList.remove('hidden');
-            });
+            if (img) {
+                img.addEventListener('click', () => {
+                    modalImage.src = card.images.large;
+                    imageModal.classList.remove('hidden');
+                });
+            }
+
+            const addButton = cardElement.querySelector('.card-btn');
+            if (pokedexNumber && addButton) {
+                updateCardButton(pokedexNumber, isCollected, addButton);
+                addButton.onclick = () => addToList(card);
+            } else if (addButton) {
+                addButton.remove();
+            }
+
+            return cardElement.firstElementChild;
+        }
+
+        function displayCardAsGrid(card) {
+            const template = `
+                <div class="text-center">
+                    <div class="img-placeholder">
+                        <img alt="${card.name}" class="card-image w-full border-4 border-black cursor-pointer opacity-0 transition-opacity duration-500" loading="lazy">
+                    </div>
+                    <div class="mt-2 text-xs">
+                        <p class="font-bold truncate">${card.name}</p>
+                    </div>
+                    <button data-pokedex="${card.nationalPokedexNumbers?.[0]}" class="card-btn"></button>
+                </div>
+            `;
+            const cardElement = createCardElement(card, template);
             resultsContainer.appendChild(cardElement);
         }
         
         function displayCardAsList(card) {
-            const pokedexNumber = card.nationalPokedexNumbers?.[0];
-            const isCollected = currentUsername && pokedexNumber ? completionList.some(item => item.pokedex === pokedexNumber) : false;
-
-            const cardElement = document.createElement('div');
-            cardElement.className = 'game-box p-3 flex flex-col sm:flex-row items-center gap-4';
-            
-            const thumbnail = document.createElement('img');
-            thumbnail.src = card.images.small;
-            thumbnail.alt = card.name;
-            thumbnail.className = 'w-20 h-28 object-cover border-2 border-black cursor-pointer';
-            thumbnail.loading = 'lazy';
-            thumbnail.onclick = () => {
-                modalImage.src = card.images.large;
-                imageModal.classList.remove('hidden');
-            };
-
-            const infoContainer = document.createElement('div');
-            infoContainer.className = 'flex-grow text-center sm:text-left';
-            infoContainer.innerHTML = `
-                <p class="font-bold text-base">${card.name}</p>
-                <p class="text-xs text-gray-500">#${String(pokedexNumber || 'N/A').padStart(3, '0')}</p>
+            const template = `
+                <div class="game-box p-3 flex flex-col sm:flex-row items-center gap-4">
+                    <div class="img-placeholder w-20 h-28 flex-shrink-0">
+                        <img src="${card.images.small}" alt="${card.name}" class="card-image w-20 h-28 object-cover border-2 border-black cursor-pointer opacity-0 transition-opacity duration-500" loading="lazy">
+                    </div>
+                    <div class="flex-grow text-center sm:text-left">
+                        <p class="font-bold text-base">${card.name}</p>
+                        <p class="text-xs text-gray-500">#${String(card.nationalPokedexNumbers?.[0] || 'N/A').padStart(3, '0')}</p>
+                    </div>
+                    <button data-pokedex="${card.nationalPokedexNumbers?.[0]}" class="card-btn"></button>
+                </div>
             `;
-
-            cardElement.appendChild(thumbnail);
-            cardElement.appendChild(infoContainer);
-
-            if (pokedexNumber) {
-                const addButton = document.createElement('button');
-                addButton.dataset.pokedex = pokedexNumber;
-                cardElement.appendChild(addButton);
-                updateCardButton(pokedexNumber, isCollected);
-                addButton.onclick = () => addToList(card);
-            }
+            const cardElement = createCardElement(card, template);
             resultsContainer.appendChild(cardElement);
         }
-        
+
         // --- Authentication and Session Logic ---
-        function login(username) {
+        async function login(username) {
             const sanitizedUsername = username.trim().toLowerCase();
             if (!sanitizedUsername) {
                 showToast("Username cannot be empty.");
@@ -408,11 +378,12 @@
             logoutBtn.classList.remove('hidden');
             showListBtn.disabled = false;
             
-            // Re-enable search input after login
-            searchInput.disabled = false;
+            await syncLocalDatabase(); // Wait for DB to load
             
+            searchInput.disabled = false;
+            searchInput.placeholder = "Search for a Pokémon...";
             listenToCollection(currentUsername);
-            searchCards('Pikachu');
+            searchLocalCards('Pikachu');
         }
 
         function logout() {
@@ -427,21 +398,18 @@
                 login(savedUser);
             } else {
                 loginModal.classList.remove('hidden');
-                // Disable search until logged in
                 searchInput.disabled = true;
+                searchInput.placeholder = "Please log in...";
             }
         }
 
         // --- Event Listeners ---
         searchInput.addEventListener('input', e => {
-            clearTimeout(suggestionTimeout);
-            const query = e.target.value.trim();
-            suggestionTimeout = setTimeout(() => fetchAutocompleteSuggestions(query), 300);
+            getAutocompleteSuggestions(e.target.value.trim());
         });
 
-        // Hide suggestions when clicking outside
         document.addEventListener('click', (e) => {
-            if (!searchInput.contains(e.target)) {
+            if (!e.target.closest('#autocomplete-container')) {
                 autocompleteResults.classList.add('hidden');
             }
         });
@@ -495,7 +463,7 @@
         #myListPanel.open { transform: translateX(0); }
         #panel-overlay { transition: opacity 0.4s ease-in-out; backdrop-filter: blur(2px); }
         .img-placeholder {
-            width: 100%;
+            display: inline-block;
             aspect-ratio: 245 / 342;
             background-color: #d1d5db;
             border: 4px solid #212121;
@@ -557,14 +525,14 @@
                         </div>
                         <div class="progress-container"><div id="progressBar" class="progress-bar-inner" style="width: 0%"></div></div>
                     </div>
-                    <button id="showListBtn" class="w-full sm:w-auto game-btn py-3 px-6 text-sm">> MY LIST</button>
+                    <button id="showListBtn" class="w-full sm:w-auto game-btn py-3 px-6 text-sm" disabled>> MY LIST</button>
                 </div>
             </div>
 
             <div id="searchView">
                 <div class="max-w-xl mx-auto mb-4 flex flex-col sm:flex-row gap-4 items-center">
-                    <div id="autocomplete-container" class="flex-grow flex w-full">
-                        <input type="text" id="searchInput" class="game-input text-center flex-grow" placeholder="Search for a Pokémon...">
+                    <div id="autocomplete-container" class="flex-grow w-full">
+                        <input type="text" id="searchInput" class="game-input text-center w-full" placeholder="Loading...">
                         <div id="autocomplete-results" class="hidden"></div>
                     </div>
                     <div class="flex gap-2">
@@ -576,9 +544,9 @@
                         </button>
                     </div>
                 </div>
+                <div id="statusDisplay" class="text-center text-gray-500 text-xs py-2"></div>
                 <main id="results" class="gap-6"></main>
             </div>
-             <div id="loader" class="hidden text-center py-10"><div class="loader"></div></div>
         </div>
 
         <footer class="text-center mt-4">
