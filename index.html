@@ -41,6 +41,8 @@
         const myListContainer = document.getElementById('myListContainer');
         const toastContainer = document.getElementById('toast-container');
         const userIdDisplay = document.getElementById('userIdDisplay');
+        const gridViewBtn = document.getElementById('gridViewBtn');
+        const listViewBtn = document.getElementById('listViewBtn');
 
         // --- State ---
         const API_BASE_URL = 'https://api.pokemontcg.io/v2/cards';
@@ -50,6 +52,8 @@
         let currentUser = null;
         let unsubscribeFromCollection = null;
         let searchTimeout; // For debouncing search input
+        let currentView = 'grid'; // 'grid' or 'list'
+        let lastDisplayedCards = []; // To redraw on view change
 
         // --- Toast Notifications ---
         function showToast(message) {
@@ -79,6 +83,19 @@
             progressBar.style.width = `${percentage}%`;
         }
 
+        function setActiveView(view) {
+            currentView = view;
+            if (view === 'grid') {
+                gridViewBtn.classList.add('game-btn-active');
+                listViewBtn.classList.remove('game-btn-active');
+            } else {
+                listViewBtn.classList.add('game-btn-active');
+                gridViewBtn.classList.remove('game-btn-active');
+            }
+            // Re-render the cards in the new view
+            displayCards(lastDisplayedCards);
+        }
+
         // --- Firestore Data Functions ---
         async function saveCollectionToFirestore() {
             if (!currentUser) return;
@@ -100,7 +117,6 @@
                 updateProgress();
                 if (myListPanel.classList.contains('open')) renderCompletionList();
                 
-                // If there are cards on screen, update their buttons without a full search
                 const displayedCardButtons = document.querySelectorAll('.card-btn[data-pokedex]');
                 if (displayedCardButtons.length > 0) {
                     displayedCardButtons.forEach(button => {
@@ -141,10 +157,13 @@
         }
         
         function updateCardButton(pokedexNumber, isCollected) {
-             const button = document.querySelector(`.card-btn[data-pokedex='${pokedexNumber}']`);
-             if (button) {
+             const buttons = document.querySelectorAll(`.card-btn[data-pokedex='${pokedexNumber}']`);
+             buttons.forEach(button => {
                 button.disabled = isCollected;
                 button.className = 'w-full mt-2 game-btn py-2 px-2 text-xs card-btn';
+                if (currentView === 'list') {
+                    button.classList.add('sm:w-auto', 'sm:mt-0');
+                }
                 if (isCollected) {
                     button.textContent = 'COLLECTED';
                     button.classList.add('game-btn-success');
@@ -152,7 +171,7 @@
                     button.textContent = '> ADD';
                     button.classList.add('game-btn-primary');
                 }
-             }
+             });
         }
 
         function renderCompletionList() {
@@ -191,7 +210,8 @@
         // --- API & Search Functions ---
         async function searchCards(query, showLoader = true) {
             if (!query) {
-                resultsContainer.innerHTML = ''; // Clear results if query is empty
+                resultsContainer.innerHTML = '';
+                lastDisplayedCards = [];
                 return;
             }
             if (showLoader) toggleLoader(true);
@@ -200,13 +220,12 @@
             const apiQuery = isPokedexNumber ? `nationalPokedexNumbers:${query}` : `name:"${query}*"`;
             try {
                 const response = await fetch(`${API_BASE_URL}?q=${apiQuery}&orderBy=set.releaseDate&pageSize=18`, {
-                    headers: {
-                        'X-Api-Key': API_KEY
-                    }
+                    headers: { 'X-Api-Key': API_KEY }
                 });
                 if (!response.ok) throw new Error(`API Error: ${response.status} ${response.statusText}`);
                 const data = await response.json();
-                displayCards(data.data || []);
+                lastDisplayedCards = data.data || [];
+                displayCards(lastDisplayedCards);
             } catch (error) {
                 console.error("API Search Error:", error);
                 showMessage('An error occurred. Try again.');
@@ -215,66 +234,102 @@
             }
         }
 
+        // --- Display Functions ---
         function displayCards(cards) {
-            resultsContainer.innerHTML = ''; // Clear previous results or placeholders
+            resultsContainer.innerHTML = '';
             if (cards.length === 0) {
-                showMessage(`No cards found for "${searchInput.value.trim()}".`);
+                if (searchInput.value) showMessage(`No cards found for "${searchInput.value.trim()}".`);
                 return;
             }
             
-            cards.forEach((card) => {
-                const pokedexNumber = card.nationalPokedexNumbers?.[0];
-                const isCollected = pokedexNumber ? completionList.some(item => item.pokedex === pokedexNumber) : false;
-                
-                const cardElement = document.createElement('div');
-                cardElement.className = 'text-center';
-                
-                // Image container with placeholder
-                const imageContainer = document.createElement('div');
-                imageContainer.className = 'img-placeholder';
+            if (currentView === 'grid') {
+                resultsContainer.className = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6';
+                cards.forEach(displayCardAsGrid);
+            } else {
+                resultsContainer.className = 'space-y-4';
+                cards.forEach(displayCardAsList);
+            }
+        }
 
-                const img = document.createElement('img');
-                img.alt = card.name;
-                img.className = 'w-full border-4 border-black cursor-pointer opacity-0 transition-opacity duration-500'; // Start transparent
-                img.loading = 'lazy'; // Still good practice
+        function displayCardAsGrid(card) {
+            const pokedexNumber = card.nationalPokedexNumbers?.[0];
+            const isCollected = pokedexNumber ? completionList.some(item => item.pokedex === pokedexNumber) : false;
+            
+            const cardElement = document.createElement('div');
+            cardElement.className = 'text-center';
+            const imageContainer = document.createElement('div');
+            imageContainer.className = 'img-placeholder';
+            const img = document.createElement('img');
+            img.alt = card.name;
+            img.className = 'w-full border-4 border-black cursor-pointer opacity-0 transition-opacity duration-500';
+            img.loading = 'lazy';
+            imageContainer.appendChild(img);
+            
+            const imageLoader = new Image();
+            imageLoader.src = card.images.small;
+            imageLoader.onload = () => {
+                img.src = imageLoader.src;
+                img.classList.remove('opacity-0');
+                imageContainer.classList.remove('img-placeholder');
+            };
+             imageLoader.onerror = () => { imageContainer.innerHTML = `<div class="w-full h-full flex items-center justify-center text-xs text-center p-2">Image not found</div>`;};
 
-                imageContainer.appendChild(img);
-
-                // Progressive image loading
-                const imageLoader = new Image();
-                imageLoader.src = card.images.small;
-                imageLoader.onload = () => {
-                    img.src = imageLoader.src;
-                    img.classList.remove('opacity-0'); // Fade in
-                    imageContainer.classList.remove('img-placeholder'); // Remove placeholder background
-                };
-                imageLoader.onerror = () => {
-                     // Handle image loading errors if needed
-                    imageContainer.innerHTML = `<div class="w-full h-full flex items-center justify-center text-xs text-center p-2">Image not found</div>`;
-                };
-
-                const cardInfo = document.createElement('div');
-                cardInfo.className = 'mt-2 text-xs';
-                cardInfo.innerHTML = `<p class="font-bold truncate">${card.name}</p>`;
-
-                cardElement.appendChild(imageContainer);
-                cardElement.appendChild(cardInfo);
-                
-                if (pokedexNumber) {
-                    const addButton = document.createElement('button');
-                    addButton.dataset.pokedex = pokedexNumber;
-                    cardElement.appendChild(addButton);
-                    updateCardButton(pokedexNumber, isCollected);
-                    addButton.onclick = () => addToList(card);
-                }
-                
-                img.addEventListener('click', () => {
-                    modalImage.src = card.images.large;
-                    imageModal.classList.remove('hidden');
-                });
-
-                resultsContainer.appendChild(cardElement);
+            const cardInfo = document.createElement('div');
+            cardInfo.className = 'mt-2 text-xs';
+            cardInfo.innerHTML = `<p class="font-bold truncate">${card.name}</p>`;
+            cardElement.appendChild(imageContainer);
+            cardElement.appendChild(cardInfo);
+            
+            if (pokedexNumber) {
+                const addButton = document.createElement('button');
+                addButton.dataset.pokedex = pokedexNumber;
+                cardElement.appendChild(addButton);
+                updateCardButton(pokedexNumber, isCollected);
+                addButton.onclick = () => addToList(card);
+            }
+            
+            img.addEventListener('click', () => {
+                modalImage.src = card.images.large;
+                imageModal.classList.remove('hidden');
             });
+            resultsContainer.appendChild(cardElement);
+        }
+        
+        function displayCardAsList(card) {
+            const pokedexNumber = card.nationalPokedexNumbers?.[0];
+            const isCollected = pokedexNumber ? completionList.some(item => item.pokedex === pokedexNumber) : false;
+
+            const cardElement = document.createElement('div');
+            cardElement.className = 'game-box p-3 flex flex-col sm:flex-row items-center gap-4';
+            
+            const thumbnail = document.createElement('img');
+            thumbnail.src = card.images.small;
+            thumbnail.alt = card.name;
+            thumbnail.className = 'w-20 h-28 object-cover border-2 border-black cursor-pointer';
+            thumbnail.loading = 'lazy';
+            thumbnail.onclick = () => {
+                modalImage.src = card.images.large;
+                imageModal.classList.remove('hidden');
+            };
+
+            const infoContainer = document.createElement('div');
+            infoContainer.className = 'flex-grow text-center sm:text-left';
+            infoContainer.innerHTML = `
+                <p class="font-bold text-base">${card.name}</p>
+                <p class="text-xs text-gray-500">#${String(pokedexNumber || 'N/A').padStart(3, '0')}</p>
+            `;
+
+            cardElement.appendChild(thumbnail);
+            cardElement.appendChild(infoContainer);
+
+            if (pokedexNumber) {
+                const addButton = document.createElement('button');
+                addButton.dataset.pokedex = pokedexNumber;
+                cardElement.appendChild(addButton);
+                updateCardButton(pokedexNumber, isCollected);
+                addButton.onclick = () => addToList(card);
+            }
+            resultsContainer.appendChild(cardElement);
         }
         
         // --- Authentication and Initialization ---
@@ -283,8 +338,7 @@
                 currentUser = user;
                 userIdDisplay.textContent = `USER ID: ${user.uid}`;
                 listenToCollection(user.uid);
-                // Perform initial search only if results are empty
-                if (!resultsContainer.hasChildNodes()) {
+                if (!resultsContainer.hasChildNodes() && !searchInput.value) {
                     searchInput.value = 'Pikachu';
                     searchCards(searchInput.value);
                 }
@@ -296,12 +350,11 @@
             }
         });
         
-        // Debounce function to limit API calls
         function debounceSearch(query) {
             clearTimeout(searchTimeout);
             searchTimeout = setTimeout(() => {
                 searchCards(query, true);
-            }, 400); // Wait 400ms after user stops typing
+            }, 400);
         }
 
         // --- Event Listeners ---
@@ -310,6 +363,8 @@
         document.addEventListener('keydown', e => e.key === 'Escape' && !imageModal.classList.contains('hidden') && imageModal.classList.add('hidden'));
         showListBtn.addEventListener('click', () => toggleListPanel(true));
         panelOverlay.addEventListener('click', () => toggleListPanel(false));
+        gridViewBtn.addEventListener('click', () => setActiveView('grid'));
+        listViewBtn.addEventListener('click', () => setActiveView('list'));
 
         // --- Initial Load ---
         async function main() {
@@ -317,6 +372,7 @@
                 console.error("Anonymous sign-in failed:", error);
                 showToast("Error: Could not connect.");
             });
+             setActiveView('grid'); // Set default view
         }
 
         main();
@@ -328,9 +384,9 @@
         }
         body { font-family: 'Press Start 2P', cursive; background-color: #e0e0e0; color: #212121; }
         .game-box { background-color: white; border: 4px solid #212121; box-shadow: 6px 6px 0px #212121; }
-        .game-btn { border: 3px solid #212121; box-shadow: 4px 4px 0px #212121; transition: all 0.1s ease-in-out; text-transform: uppercase; font-size: 14px; }
+        .game-btn { border: 3px solid #212121; box-shadow: 4px 4px 0px #212121; transition: all 0.1s ease-in-out; text-transform: uppercase; font-size: 14px; background-color: #fff; }
         .game-btn:hover { background-color: #f0f0f0; }
-        .game-btn:active { box-shadow: 0px 0px 0px #212121; transform: translate(4px, 4px); }
+        .game-btn:active, .game-btn-active { box-shadow: 0px 0px 0px #212121; transform: translate(4px, 4px); background-color: #e0e0e0;}
         .game-btn-primary { background-color: #2979ff; color: white; }
         .game-btn-primary:hover { background-color: #2962ff; }
         .game-btn-success { background-color: #00c853; color: white; }
@@ -341,25 +397,21 @@
         .progress-bar-inner { background-color: #2979ff; transition: width 0.5s ease-out; height: 16px; }
         .loader { width: 48px; height: 48px; border: 5px solid #212121; border-bottom-color: transparent; border-radius: 50%; display: inline-block; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        #toast-container { position: fixed; bottom: 0; left: 0; right: 0; z-index: 1000; }
+        #toast-container { position: fixed; bottom: 0; left: 0; right: 0; z-index: 1000; pointer-events: none; }
         .toast { background-color: #212121; color: white; padding: 20px; border-top: 4px solid #9e9e9e; animation: slide-up 0.3s ease-out, slide-down 0.3s ease-in 2.7s forwards; font-size: 14px; text-align: center; }
         @keyframes slide-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
         @keyframes slide-down { from { transform: translateY(0); } to { transform: translateY(100%); } }
         #myListPanel { border-left: 4px solid #212121; background-color: #f0f0f0; transition: transform 0.4s ease-in-out; transform: translateX(100%); }
         #myListPanel.open { transform: translateX(0); }
         #panel-overlay { transition: opacity 0.4s ease-in-out; backdrop-filter: blur(2px); }
-        
-        /* New styles for progressive image loading */
         .img-placeholder {
             width: 100%;
-            aspect-ratio: 245 / 342; /* Standard Pokémon card aspect ratio */
-            background-color: #d1d5db; /* gray-300 */
+            aspect-ratio: 245 / 342;
+            background-color: #d1d5db;
             border: 4px solid #212121;
             animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
         }
-        @keyframes pulse {
-            50% { opacity: .5; }
-        }
+        @keyframes pulse { 50% { opacity: .5; } }
     </style>
 </head>
 <body class="antialiased">
@@ -384,10 +436,20 @@
                 </div>
             </div>
 
-            <!-- Search -->
+            <!-- Search & View Controls -->
             <div id="searchView">
-                <div class="max-w-xl mx-auto mb-6"><input type="text" id="searchInput" class="game-input text-center" placeholder="Search Name or ID"></div>
-                <main id="results" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6"></main>
+                <div class="max-w-xl mx-auto mb-4 flex gap-4 items-center">
+                    <input type="text" id="searchInput" class="game-input text-center flex-grow" placeholder="Search Name or ID">
+                    <div class="flex gap-2">
+                        <button id="gridViewBtn" title="Grid View" class="game-btn p-3">
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
+                        </button>
+                        <button id="listViewBtn" title="List View" class="game-btn p-3">
+                             <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10zm0 5.25a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75z" clip-rule="evenodd"></path></svg>
+                        </button>
+                    </div>
+                </div>
+                <main id="results" class="gap-6"></main>
             </div>
              <!-- Loader -->
             <div id="loader" class="hidden text-center py-10"><div class="loader"></div></div>
