@@ -12,6 +12,7 @@
     <script type="module">
         // --- Firebase SDKs ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- DOM References ---
@@ -33,18 +34,25 @@
         const listViewBtn = document.getElementById('listViewBtn');
         const loginModal = document.getElementById('loginModal');
         const loginForm = document.getElementById('loginForm');
-        const usernameInput = document.getElementById('usernameInput');
+        const emailInput = document.getElementById('emailInput');
+        const passwordInput = document.getElementById('passwordInput');
+        const loginError = document.getElementById('loginError');
+        const loginTitle = document.getElementById('loginTitle');
+        const loginSubmitBtn = document.getElementById('loginSubmitBtn');
+        const toggleAuthMode = document.getElementById('toggleAuthMode');
         const autocompleteResults = document.getElementById('autocomplete-results');
         const statusDisplay = document.getElementById('statusDisplay');
 
         // --- State and Config ---
         const TOTAL_POKEMON = 1025; 
         let completionList = [];
-        let currentUsername = null;
+        let currentUser = null;
         let unsubscribeFromCollection = null;
         let currentView = 'grid';
         let lastDisplayedCards = [];
-        
+        let localCardDatabase = [];
+        let isRegistering = false;
+
         // --- Firebase Initialization ---
         const firebaseConfig = {
           apiKey: "AIzaSyBqKvL31__K5UZo-iwjO7uN5zPN4t8aDn4",
@@ -55,6 +63,7 @@
           appId: "1:567243781113:web:53c5a8e442b4967cdb4328"
         };
         const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
         const db = getFirestore(app);
         const appId = firebaseConfig.appId;
 
@@ -69,7 +78,7 @@
 
         function toggleListPanel(open) {
             if (open) {
-                if (!currentUsername) {
+                if (!currentUser) {
                     showToast("Please log in to manage a list.");
                     return;
                 }
@@ -98,9 +107,9 @@
 
         // --- Firestore Data Functions ---
         async function saveCollectionToFirestore() {
-            if (!currentUsername) return;
+            if (!currentUser) return;
             try {
-                const userDocRef = doc(db, "artifacts", appId, "users", currentUsername, "collection", "data");
+                const userDocRef = doc(db, "artifacts", appId, "users", currentUser.uid, "collection", "data");
                 await setDoc(userDocRef, { list: completionList });
             } catch (error) {
                 console.error("Error saving collection: ", error);
@@ -108,15 +117,15 @@
             }
         }
 
-        function listenToCollection(username) {
+        function listenToCollection(userId) {
             if (unsubscribeFromCollection) unsubscribeFromCollection();
-            const userDocRef = doc(db, "artifacts", appId, "users", username, "collection", "data");
+            const userDocRef = doc(db, "artifacts", appId, "users", userId, "collection", "data");
             
             unsubscribeFromCollection = onSnapshot(userDocRef, (docSnap) => {
                 completionList = docSnap.exists() ? docSnap.data().list || [] : [];
                 updateProgress();
                 if (myListPanel.classList.contains('open')) renderCompletionList();
-                displayCards(lastDisplayedCards); // Re-render to update buttons
+                displayCards(lastDisplayedCards);
             }, (error) => {
                 console.error("Error listening to collection:", error);
                 showToast("CONNECTION LOST! Check console (F12).");
@@ -125,7 +134,7 @@
 
         // --- Core App Logic ---
         async function addToList(card) {
-            if (!currentUsername) {
+            if (!currentUser) {
                 showToast("Please log in to save cards.");
                 return;
             }
@@ -145,7 +154,7 @@
         }
 
         async function removeFromList(pokedexNumber) {
-            if (!currentUsername) return;
+            if (!currentUser) return;
             const removedItem = completionList.find(item => item.pokedex === pokedexNumber);
             completionList = completionList.filter(item => item.pokedex !== pokedexNumber);
             await saveCollectionToFirestore();
@@ -191,7 +200,37 @@
             });
         }
         
-        // --- NEW: Local Search Functions ---
+        // --- Local Database Sync ---
+        async function syncLocalDatabase() {
+            // Check if the database is already in memory or localStorage
+            const storedDb = localStorage.getItem('pokemon-card-db');
+            if (storedDb) {
+                localCardDatabase = JSON.parse(storedDb);
+                return;
+            }
+
+            const dataUrl = 'https://cdn.jsdelivr.net/gh/anonymous/5d1c44891e4599525e656d05f3283296/raw/pokemon_tcg_db.json';
+            try {
+                statusDisplay.textContent = 'SYNCING DATABASE...';
+                const response = await fetch(dataUrl);
+                if (!response.ok) {
+                    throw new Error(`Network response was not ok. Status: ${response.status}`);
+                }
+                localCardDatabase = await response.json();
+                if (!Array.isArray(localCardDatabase)) {
+                    throw new Error("Downloaded data is not an array.");
+                }
+                // Save to localStorage to avoid re-downloading
+                localStorage.setItem('pokemon-card-db', JSON.stringify(localCardDatabase));
+                statusDisplay.textContent = 'DATABASE SYNCED. READY!';
+                setTimeout(() => { statusDisplay.textContent = '' }, 2000);
+            } catch (error) {
+                console.error('Database sync failed:', error);
+                statusDisplay.textContent = `DB SYNC FAILED: ${error.message}`;
+            }
+        }
+
+        // --- Local Search Functions ---
         function getAutocompleteSuggestions(query) {
             if (!query || localCardDatabase.length === 0) {
                 displayAutocomplete([]);
@@ -271,7 +310,7 @@
             cardElement.innerHTML = template;
 
             const pokedexNumber = card.nationalPokedexNumbers?.[0];
-            const isCollected = currentUsername && pokedexNumber ? completionList.some(item => item.pokedex === pokedexNumber) : false;
+            const isCollected = currentUser && pokedexNumber ? completionList.some(item => item.pokedex === pokedexNumber) : false;
 
             const img = cardElement.querySelector('.card-image');
             const imageContainer = cardElement.querySelector('.img-placeholder');
@@ -340,42 +379,71 @@
             resultsContainer.appendChild(cardElement);
         }
 
-        // --- Authentication and Session Logic ---
-        function login(username) {
-            const sanitizedUsername = username.trim().toLowerCase();
-            if (!sanitizedUsername) {
-                showToast("Username cannot be empty.");
-                return;
-            }
-            localStorage.setItem('pokemon-tracker-username', sanitizedUsername);
-            currentUsername = sanitizedUsername;
-            
-            loginModal.classList.add('hidden');
-            userDisplay.textContent = `PLAYER: ${currentUsername}`;
-            logoutBtn.classList.remove('hidden');
-            showListBtn.disabled = false;
-            statusDisplay.textContent = ''; // Clear any sync messages
-            
-            searchInput.disabled = false;
-            searchInput.placeholder = "Search for a Pokémon...";
-            listenToCollection(currentUsername);
-            searchLocalCards('Pikachu');
-        }
-
-        function logout() {
-            if (unsubscribeFromCollection) unsubscribeFromCollection();
-            localStorage.removeItem('pokemon-tracker-username');
-            window.location.reload();
-        }
-
-        function checkForUser() {
-            const savedUser = localStorage.getItem('pokemon-tracker-username');
-            if (savedUser) {
-                login(savedUser);
+        // --- NEW: Authentication and Session Logic ---
+        function setAuthMode(isRegister) {
+            isRegistering = isRegister;
+            loginError.textContent = '';
+            if (isRegister) {
+                loginTitle.textContent = 'CREATE ACCOUNT';
+                loginSubmitBtn.textContent = '> REGISTER';
+                toggleAuthMode.innerHTML = 'Already have an account? <span class="underline">Login</span>';
             } else {
+                loginTitle.textContent = 'PLAYER LOGIN';
+                loginSubmitBtn.textContent = '> LOGIN';
+                toggleAuthMode.innerHTML = 'Need an account? <span class="underline">Register</span>';
+            }
+        }
+
+        async function handleAuthForm(e) {
+            e.preventDefault();
+            const email = emailInput.value;
+            const password = passwordInput.value;
+            loginError.textContent = '';
+
+            try {
+                if (isRegistering) {
+                    await createUserWithEmailAndPassword(auth, email, password);
+                } else {
+                    await signInWithEmailAndPassword(auth, email, password);
+                }
+                // onAuthStateChanged will handle the rest
+            } catch (error) {
+                loginError.textContent = error.message.replace('Firebase: ', '');
+            }
+        }
+        
+        async function handleAuthState(user) {
+            if (user) {
+                // User is logged in
+                currentUser = user;
+                loginModal.classList.add('hidden');
+                userDisplay.textContent = `PLAYER: ${user.email}`;
+                logoutBtn.classList.remove('hidden');
+                showListBtn.disabled = false;
+                
+                // Sync DB only if it's not already loaded
+                if (localCardDatabase.length === 0) {
+                    await syncLocalDatabase();
+                }
+
+                searchInput.disabled = false;
+                searchInput.placeholder = "Search for a Pokémon...";
+                listenToCollection(user.uid);
+                searchLocalCards('Pikachu');
+            } else {
+                // User is logged out
+                currentUser = null;
+                completionList = [];
+                updateProgress();
+                if (unsubscribeFromCollection) unsubscribeFromCollection();
+                
                 loginModal.classList.remove('hidden');
+                userDisplay.textContent = 'LOGGED OUT';
+                logoutBtn.classList.add('hidden');
+                showListBtn.disabled = true;
                 searchInput.disabled = true;
                 searchInput.placeholder = "Please log in...";
+                resultsContainer.innerHTML = '';
             }
         }
 
@@ -396,20 +464,14 @@
         panelOverlay.addEventListener('click', () => toggleListPanel(false));
         gridViewBtn.addEventListener('click', () => setActiveView('grid'));
         listViewBtn.addEventListener('click', () => setActiveView('list'));
-        logoutBtn.addEventListener('click', logout);
-        loginForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            login(usernameInput.value);
-        });
+        logoutBtn.addEventListener('click', () => signOut(auth));
+        loginForm.addEventListener('submit', handleAuthForm);
+        toggleAuthMode.addEventListener('click', () => setAuthMode(!isRegistering));
 
-        // --- NEW: Embedded Database ---
-        // The database is now included directly in the file to prevent network errors.
-        const localCardDatabase = [{"id":"xy7-4","name":"Bellossom","images":{"small":"https://images.pokemontcg.io/xy7/4.png","large":"https://images.pokemontcg.io/xy7/4_hires.png"},"nationalPokedexNumbers":[182]},{"id":"xy7-5","name":"Vileplume","images":{"small":"https://images.pokemontcg.io/xy7/5.png","large":"https://images.pokemontcg.io/xy7/5_hires.png"},"nationalPokedexNumbers":[45]},{"id":"xy7-6","name":"Vespiquen","images":{"small":"https://images.pokemontcg.io/xy7/6.png","large":"https://images.pokemontcg.io/xy7/6_hires.png"},"nationalPokedexNumbers":[416]},{"id":"xy7-7","name":"Leafeon","images":{"small":"https://images.pokemontcg.io/xy7/7.png","large":"https://images.pokemontcg.io/xy7/7_hires.png"},"nationalPokedexNumbers":[470]},{"id":"xy7-10","name":"Flareon","images":{"small":"https://images.pokemontcg.io/xy7/10.png","large":"https://images.pokemontcg.io/xy7/10_hires.png"},"nationalPokedexNumbers":[136]},{"id":"xy7-12","name":"Vaporeon","images":{"small":"https://images.pokemontcg.io/xy7/12.png","large":"https://images.pokemontcg.io/xy7/12_hires.png"},"nationalPokedexNumbers":[134]},{"id":"xy7-13","name":"Regice","images":{"small":"https://images.pokemontcg.io/xy7/13.png","large":"https://images.pokemontcg.io/xy7/13_hires.png"},"nationalPokedexNumbers":[378]},{"id":"xy7-15","name":"Glaceon","images":{"small":"https://images.pokemontcg.io/xy7/15.png","large":"https://images.pokemontcg.io/xy7/15_hires.png"},"nationalPokedexNumbers":[471]},{"id":"xy7-16","name":"Jolteon","images":{"small":"https://images.pokemontcg.io/xy7/16.png","large":"https://images.pokemontcg.io/xy7/16_hires.png"},"nationalPokedexNumbers":[135]},{"id":"xy7-18","name":"Unown","images":{"small":"https://images.pokemontcg.io/xy7/18.png","large":"https://images.pokemontcg.io/xy7/18_hires.png"},"nationalPokedexNumbers":[201]},{"id":"xy7-20","name":"Espeon","images":{"small":"https://images.pokemontcg.io/xy7/20.png","large":"https://images.pokemontcg.io/xy7/20_hires.png"},"nationalPokedexNumbers":[196]},{"id":"xy7-22","name":"Regirock","images":{"small":"https://images.pokemontcg.io/xy7/22.png","large":"https://images.pokemontcg.io/xy7/22_hires.png"},"nationalPokedexNumbers":[377]},{"id":"xy7-25","name":"Umbreon","images":{"small":"https://images.pokemontcg.io/xy7/25.png","large":"https://images.pokemontcg.io/xy7/25_hires.png"},"nationalPokedexNumbers":[197]},{"id":"xy7-26","name":"Registeel","images":{"small":"https://images.pokemontcg.io/xy7/26.png","large":"https://images.pokemontcg.io/xy7/26_hires.png"},"nationalPokedexNumbers":[379]},{"id":"xy7-28","name":"Sylveon","images":{"small":"https://images.pokemontcg.io/xy7/28.png","large":"https://images.pokemontcg.io/xy7/28_hires.png"},"nationalPokedexNumbers":[700]},{"id":"xy7-30","name":"Porygon-Z","images":{"small":"https://images.pokemontcg.io/xy7/30.png","large":"https://images.pokemontcg.io/xy7/30_hires.png"},"nationalPokedexNumbers":[474]},{"id":"pop4-1","name":"Lugia","images":{"small":"https://images.pokemontcg.io/pop4/1.png","large":"https://images.pokemontcg.io/pop4/1_hires.png"},"nationalPokedexNumbers":[249]},{"id":"pop4-2","name":"Mew","images":{"small":"https://images.pokemontcg.io/pop4/2.png","large":"https://images.pokemontcg.io/pop4/2_hires.png"},"nationalPokedexNumbers":[151]},{"id":"pl2-1","name":"Floatzel GL","images":{"small":"https://images.pokemontcg.io/pl2/1.png","large":"https://images.pokemontcg.io/pl2/1_hires.png"},"nationalPokedexNumbers":[419]},{"id":"pl2-2","name":"Garchomp C","images":{"small":"https://images.pokemontcg.io/pl2/2.png","large":"https://images.pokemontcg.io/pl2/2_hires.png"},"nationalPokedexNumbers":[445]},{"id":"pop8-1","name":"Lugia","images":{"small":"https://images.pokemontcg.io/pop8/1.png","large":"https://images.pokemontcg.io/pop8/1_hires.png"},"nationalPokedexNumbers":[249]},{"id":"pop8-2","name":"Mew","images":{"small":"https://images.pokemontcg.io/pop8/2.png","large":"https://images.pokemontcg.io/pop8/2_hires.png"},"nationalPokedexNumbers":[151]},{"id":"pl3-1","name":"Absol G","images":{"small":"https://images.pokemontcg.io/pl3/1.png","large":"https://images.pokemontcg.io/pl3/1_hires.png"},"nationalPokedexNumbers":[359]},{"id":"pl3-2","name":"Blaziken FB","images":{"small":"https://images.pokemontcg.io/pl3/2.png","large":"https://images.pokemontcg.io/pl3/2_hires.png"},"nationalPokedexNumbers":[257]},{"id":"pl4-1","name":"Charizard G","images":{"small":"https://images.pokemontcg.io/pl4/1.png","large":"https://images.pokemontcg.io/pl4/1_hires.png"},"nationalPokedexNumbers":[6]},{"id":"pl4-2","name":"Flygon","images":{"small":"https://images.pokemontcg.io/pl4/2.png","large":"https://images.pokemontcg.io/pl4/2_hires.png"},"nationalPokedexNumbers":[330]},{"id":"ru1-1","name":"Venusaur","images":{"small":"https://images.pokemontcg.io/ru1/1.png","large":"https://images.pokemontcg.io/ru1/1_hires.png"},"nationalPokedexNumbers":[3]},{"id":"ex12-1","name":"Aerodactyl","images":{"small":"https://images.pokemontcg.io/ex12/1.png","large":"https://images.pokemontcg.io/ex12/1_hires.png"},"nationalPokedexNumbers":[142]},{"id":"ex12-2","name":"Articuno","images":{"small":"https://images.pokemontcg.io/ex12/2.png","large":"https://images.pokemontcg.io/ex12/2_hires.png"},"nationalPokedexNumbers":[144]},{"id":"pop5-1","name":"Ho-Oh","images":{"small":"https://images.pokemontcg.io/pop5/1.png","large":"https://images.pokemontcg.io/pop5/1_hires.png"},"nationalPokedexNumbers":[250]},{"id":"pop5-2","name":"Lugia","images":{"small":"https://images.pokemontcg.io/pop5/2.png","large":"https://images.pokemontcg.io/pop5/2_hires.png"},"nationalPokedexNumbers":[249]}];
-        
         // --- Initial Load ---
         function main() {
             setActiveView('grid');
-            checkForUser();
+            onAuthStateChanged(auth, handleAuthState);
         }
 
         main();
@@ -433,8 +495,6 @@
         .game-input:focus { outline: none; border-color: #2979ff; }
         .progress-container { border: 3px solid #212121; background-color: #e0e0e0; padding: 4px; }
         .progress-bar-inner { background-color: #2979ff; transition: width 0.5s ease-out; height: 16px; }
-        .loader { width: 48px; height: 48px; border: 5px solid #212121; border-bottom-color: transparent; border-radius: 50%; display: inline-block; animation: spin 1s linear infinite; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         #toast-container { position: fixed; bottom: 0; left: 0; right: 0; z-index: 1000; pointer-events: none; }
         .toast { background-color: #212121; color: white; padding: 20px; border-top: 4px solid #9e9e9e; animation: slide-up 0.3s ease-out, slide-down 0.3s ease-in 2.7s forwards; font-size: 14px; text-align: center; }
         @keyframes slide-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
@@ -483,12 +543,14 @@
 </head>
 <body class="antialiased">
     <!-- Login Modal -->
-    <div id="loginModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-70 hidden">
+    <div id="loginModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-70">
         <form id="loginForm" class="game-box p-8 text-center w-full max-w-sm">
-            <h2 class="text-2xl font-bold mb-4">CHOOSE YOUR PLAYER NAME</h2>
-            <p class="text-xs text-gray-500 mb-6">This name will be saved on this browser to track your collection.</p>
-            <input type="text" id="usernameInput" class="game-input text-center mb-6" placeholder="e.g., Trainer Ash" required>
-            <button type="submit" class="w-full game-btn game-btn-primary py-3">> START</button>
+            <h2 id="loginTitle" class="text-2xl font-bold mb-4">PLAYER LOGIN</h2>
+            <p id="loginError" class="text-red-500 text-xs mb-4 h-4"></p>
+            <input type="email" id="emailInput" class="game-input text-center mb-4" placeholder="Enter your email" required>
+            <input type="password" id="passwordInput" class="game-input text-center mb-6" placeholder="Enter your password" required>
+            <button id="loginSubmitBtn" type="submit" class="w-full game-btn game-btn-primary py-3">> LOGIN</button>
+            <p id="toggleAuthMode" class="text-xs text-gray-500 mt-6 cursor-pointer">Need an account? <span class="underline">Register</span></p>
         </form>
     </div>
 
@@ -520,7 +582,7 @@
                             <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
                         </button>
                         <button id="listViewBtn" title="List View" class="game-btn p-3">
-                             <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10zm0 5.25a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 01-.75-.75z" clip-rule="evenodd"></path></svg>
+                             <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10zm0 5.25a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75z" clip-rule="evenodd"></path></svg>
                         </button>
                     </div>
                 </div>
