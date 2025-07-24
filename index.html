@@ -43,6 +43,7 @@
         const autocompleteResults = document.getElementById('autocomplete-results');
         const statusDisplay = document.getElementById('statusDisplay');
 
+
         // --- State and Config ---
         const TOTAL_POKEMON = 1025; 
         let completionList = [];
@@ -202,25 +203,31 @@
         
         // --- Local Database Sync ---
         async function syncLocalDatabase() {
-            // Check if the database is already in memory or localStorage
             const storedDb = localStorage.getItem('pokemon-card-db');
             if (storedDb) {
-                localCardDatabase = JSON.parse(storedDb);
-                return;
+                try {
+                    localCardDatabase = JSON.parse(storedDb);
+                    if (localCardDatabase && localCardDatabase.length > 0) return;
+                } catch (e) {
+                    console.error("Could not parse local DB, refetching...", e);
+                }
             }
 
-            const dataUrl = 'https://cdn.jsdelivr.net/gh/anonymous/5d1c44891e4599525e656d05f3283296/raw/pokemon_tcg_db.json';
+            const dataUrl = 'https://cdn.jsdelivr.net/gh/PokemonTCG/pokemon-tcg-data@master/cards/en/all.json';
             try {
                 statusDisplay.textContent = 'SYNCING DATABASE...';
                 const response = await fetch(dataUrl);
-                if (!response.ok) {
-                    throw new Error(`Network response was not ok. Status: ${response.status}`);
-                }
-                localCardDatabase = await response.json();
-                if (!Array.isArray(localCardDatabase)) {
-                    throw new Error("Downloaded data is not an array.");
-                }
-                // Save to localStorage to avoid re-downloading
+                if (!response.ok) throw new Error(`Network response was not ok. Status: ${response.status}`);
+                
+                const rawData = await response.json();
+                // Filter and map to the format we need to save space
+                localCardDatabase = rawData.map(card => ({
+                    id: card.id,
+                    name: card.name,
+                    images: card.images,
+                    nationalPokedexNumbers: card.nationalPokedexNumbers
+                }));
+
                 localStorage.setItem('pokemon-card-db', JSON.stringify(localCardDatabase));
                 statusDisplay.textContent = 'DATABASE SYNCED. READY!';
                 setTimeout(() => { statusDisplay.textContent = '' }, 2000);
@@ -262,10 +269,9 @@
             } else {
                 results = localCardDatabase.filter(card => card.name.toLowerCase().includes(lowerCaseQuery));
             }
-
-            const uniqueResults = Array.from(new Map(results.map(card => [card.name, card])).values());
             
-            lastDisplayedCards = uniqueResults.slice(0, 18);
+            // REMOVED DE-DUPLICATION to show all variants
+            lastDisplayedCards = results.slice(0, 50); // Show up to 50 variants
             displayCards(lastDisplayedCards);
         }
 
@@ -379,7 +385,7 @@
             resultsContainer.appendChild(cardElement);
         }
 
-        // --- NEW: Authentication and Session Logic ---
+        // --- Authentication and Session Logic ---
         function setAuthMode(isRegister) {
             isRegistering = isRegister;
             loginError.textContent = '';
@@ -406,7 +412,6 @@
                 } else {
                     await signInWithEmailAndPassword(auth, email, password);
                 }
-                // onAuthStateChanged will handle the rest
             } catch (error) {
                 loginError.textContent = error.message.replace('Firebase: ', '');
             }
@@ -414,24 +419,19 @@
         
         async function handleAuthState(user) {
             if (user) {
-                // User is logged in
                 currentUser = user;
                 loginModal.classList.add('hidden');
                 userDisplay.textContent = `PLAYER: ${user.email}`;
                 logoutBtn.classList.remove('hidden');
                 showListBtn.disabled = false;
                 
-                // Sync DB only if it's not already loaded
-                if (localCardDatabase.length === 0) {
-                    await syncLocalDatabase();
-                }
+                await syncLocalDatabase();
 
                 searchInput.disabled = false;
-                searchInput.placeholder = "Search for a Pokémon...";
+                searchInput.placeholder = "Search Name or Pokédex Nr.";
                 listenToCollection(user.uid);
                 searchLocalCards('Pikachu');
             } else {
-                // User is logged out
                 currentUser = null;
                 completionList = [];
                 updateProgress();
@@ -451,6 +451,14 @@
         searchInput.addEventListener('input', e => {
             getAutocompleteSuggestions(e.target.value.trim());
         });
+        
+        searchInput.addEventListener('keyup', e => {
+            if (e.key === 'Enter') {
+                autocompleteResults.classList.add('hidden');
+                searchLocalCards(searchInput.value.trim());
+            }
+        });
+
 
         document.addEventListener('click', (e) => {
             if (!e.target.closest('#autocomplete-container')) {
@@ -504,11 +512,13 @@
         #panel-overlay { transition: opacity 0.4s ease-in-out; backdrop-filter: blur(2px); }
         .img-placeholder {
             display: inline-block;
+            width: 100%;
             aspect-ratio: 245 / 342;
             background-color: #d1d5db;
             border: 4px solid #212121;
             animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
         }
+         .img-placeholder.w-20 { width: 5rem; }
         @keyframes pulse { 50% { opacity: .5; } }
 
         /* Autocomplete styles */
@@ -582,7 +592,7 @@
                             <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
                         </button>
                         <button id="listViewBtn" title="List View" class="game-btn p-3">
-                             <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10zm0 5.25a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75z" clip-rule="evenodd"></path></svg>
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10zm0 5.25a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75z" clip-rule="evenodd"></path></svg>
                         </button>
                     </div>
                 </div>
