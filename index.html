@@ -194,16 +194,14 @@
         
         // --- NEW: Local Database Sync ---
         async function syncLocalDatabase() {
-            // This URL now points to a permanent, stable location for the card data via GitHub Gist.
-            const dataUrl = 'https://gist.githubusercontent.com/anonymous/5d1c44891e4599525e656d05f3283296/raw/pokemon_tcg_db.json';
+            // This URL now points to a permanent, stable location for the card data via a CDN.
+            const dataUrl = 'https://cdn.jsdelivr.net/gh/anonymous/5d1c44891e4599525e656d05f3283296/raw/pokemon_tcg_db.json';
             try {
                 statusDisplay.textContent = 'SYNCING DATABASE...';
-                // No access key is needed for a public Gist.
                 const response = await fetch(dataUrl);
                 if (!response.ok) {
                     throw new Error(`Network response was not ok. Status: ${response.status}`);
                 }
-                // Gist returns the raw data directly, not nested in a "record" object.
                 localCardDatabase = await response.json();
                 if (!Array.isArray(localCardDatabase)) {
                     throw new Error("Downloaded data is not an array.");
