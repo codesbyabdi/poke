@@ -4,14 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pokémon TCG Tracker - Retro UI</title>
-    <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Google Fonts: Press Start 2P -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     
-    <!-- Firebase JS SDK -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -28,6 +25,7 @@
 
         // --- DOM References ---
         const searchInput = document.getElementById('searchInput');
+        const searchBtn = document.getElementById('searchBtn');
         const resultsContainer = document.getElementById('results');
         const loader = document.getElementById('loader');
         const imageModal = document.getElementById('imageModal');
@@ -54,6 +52,7 @@
         let searchTimeout; // For debouncing search input
         let currentView = 'grid'; // 'grid' or 'list'
         let lastDisplayedCards = []; // To redraw on view change
+        const searchCache = {}; // Cache for search results
 
         // --- Toast Notifications ---
         function showToast(message) {
@@ -67,6 +66,10 @@
         // --- UI Functions ---
         function toggleListPanel(open) {
             if (open) {
+                if (!currentUser) {
+                    showToast("Sign-in needed to manage a list.");
+                    return;
+                }
                 renderCompletionList();
                 panelOverlay.classList.remove('hidden');
                 myListPanel.classList.add('open');
@@ -92,7 +95,6 @@
                 listViewBtn.classList.add('game-btn-active');
                 gridViewBtn.classList.remove('game-btn-active');
             }
-            // Re-render the cards in the new view
             displayCards(lastDisplayedCards);
         }
 
@@ -133,8 +135,12 @@
 
         // --- Core App Logic ---
         async function addToList(card) {
+            if (!currentUser) {
+                showToast("Please sign in to save cards.");
+                return;
+            }
             const pokedexNumber = card.nationalPokedexNumbers?.[0];
-            if (!pokedexNumber || !currentUser) return;
+            if (!pokedexNumber) return;
 
             if (!completionList.some(item => item.pokedex === pokedexNumber)) {
                 const newEntry = {
@@ -207,13 +213,20 @@
             if (isLoading) resultsContainer.innerHTML = '';
         }
         
-        // --- API & Search Functions ---
+        // --- API & Search Functions with Caching ---
         async function searchCards(query, showLoader = true) {
             if (!query) {
                 resultsContainer.innerHTML = '';
                 lastDisplayedCards = [];
                 return;
             }
+
+            if (searchCache[query]) {
+                lastDisplayedCards = searchCache[query];
+                displayCards(lastDisplayedCards);
+                return;
+            }
+
             if (showLoader) toggleLoader(true);
 
             const isPokedexNumber = /^\d+$/.test(query);
@@ -225,6 +238,7 @@
                 if (!response.ok) throw new Error(`API Error: ${response.status} ${response.statusText}`);
                 const data = await response.json();
                 lastDisplayedCards = data.data || [];
+                searchCache[query] = lastDisplayedCards;
                 displayCards(lastDisplayedCards);
             } catch (error) {
                 console.error("API Search Error:", error);
@@ -253,7 +267,7 @@
 
         function displayCardAsGrid(card) {
             const pokedexNumber = card.nationalPokedexNumbers?.[0];
-            const isCollected = pokedexNumber ? completionList.some(item => item.pokedex === pokedexNumber) : false;
+            const isCollected = currentUser && pokedexNumber ? completionList.some(item => item.pokedex === pokedexNumber) : false;
             
             const cardElement = document.createElement('div');
             cardElement.className = 'text-center';
@@ -297,7 +311,7 @@
         
         function displayCardAsList(card) {
             const pokedexNumber = card.nationalPokedexNumbers?.[0];
-            const isCollected = pokedexNumber ? completionList.some(item => item.pokedex === pokedexNumber) : false;
+            const isCollected = currentUser && pokedexNumber ? completionList.some(item => item.pokedex === pokedexNumber) : false;
 
             const cardElement = document.createElement('div');
             cardElement.className = 'game-box p-3 flex flex-col sm:flex-row items-center gap-4';
@@ -333,32 +347,60 @@
         }
         
         // --- Authentication and Initialization ---
-        onAuthStateChanged(auth, user => {
-            if (user) {
+        function handleAuthState(user) {
+             if (user) {
                 currentUser = user;
                 userIdDisplay.textContent = `USER ID: ${user.uid}`;
                 listenToCollection(user.uid);
-                if (!resultsContainer.hasChildNodes() && !searchInput.value) {
-                    searchInput.value = 'Pikachu';
-                    searchCards(searchInput.value);
-                }
             } else {
                 currentUser = null;
                 completionList = [];
                 updateProgress();
-                userIdDisplay.textContent = 'USER ID: Not signed in';
+                userIdDisplay.textContent = 'Sign-in required to save progress';
             }
-        });
+            if (!searchInput.value) {
+                searchInput.value = 'Pikachu';
+                searchCards(searchInput.value, true);
+            }
+        }
+
+        onAuthStateChanged(auth, handleAuthState);
         
         function debounceSearch(query) {
             clearTimeout(searchTimeout);
             searchTimeout = setTimeout(() => {
                 searchCards(query, true);
-            }, 400);
+            }, 500);
+        }
+        
+        function forceSearch() {
+            clearTimeout(searchTimeout);
+            const query = searchInput.value.trim();
+            searchCards(query, true);
         }
 
         // --- Event Listeners ---
-        searchInput.addEventListener('input', e => debounceSearch(e.target.value.trim()));
+        searchInput.addEventListener('input', e => {
+            clearTimeout(searchTimeout); // Clear previous timer
+            const query = e.target.value.trim();
+            if (query) {
+                // Show loaders immediately for better UX
+                toggleLoader(true);
+                debounceSearch(query);
+            } else {
+                // Clear everything if input is empty
+                toggleLoader(false);
+                resultsContainer.innerHTML = '';
+                lastDisplayedCards = [];
+            }
+        });
+
+        searchInput.addEventListener('keyup', e => {
+            if (e.key === 'Enter') {
+                forceSearch();
+            }
+        });
+        searchBtn.addEventListener('click', forceSearch);
         closeModalButton.addEventListener('click', () => imageModal.classList.add('hidden'));
         document.addEventListener('keydown', e => e.key === 'Escape' && !imageModal.classList.contains('hidden') && imageModal.classList.add('hidden'));
         showListBtn.addEventListener('click', () => toggleListPanel(true));
@@ -368,11 +410,13 @@
 
         // --- Initial Load ---
         async function main() {
-             await signInAnonymously(auth).catch(error => {
-                console.error("Anonymous sign-in failed:", error);
-                showToast("Error: Could not connect.");
-            });
-             setActiveView('grid'); // Set default view
+            try {
+                await signInAnonymously(auth);
+            } catch (error) {
+                console.error("Anonymous sign-in failed. This can happen in incognito/private mode.", error);
+                handleAuthState(null);
+            }
+            setActiveView('grid');
         }
 
         main();
@@ -415,14 +459,10 @@
     </style>
 </head>
 <body class="antialiased">
-    <!-- Main Content -->
     <div class="max-w-7xl mx-auto p-4 md:p-8 relative z-10">
-        <!-- Header -->
         <header class="text-center mb-10 p-4"><h1 class="text-3xl md:text-4xl font-black mb-2 tracking-tighter">POKéMON TCG TRACKER</h1></header>
 
-        <!-- Main Content Box -->
         <div class="game-box p-4 md:p-6">
-            <!-- Progress & Controls -->
             <div class="mb-6 pb-6 border-b-4 border-dashed border-gray-300">
                 <div class="flex flex-col sm:flex-row justify-between items-center gap-6">
                     <div class="w-full sm:w-2/3">
@@ -436,30 +476,31 @@
                 </div>
             </div>
 
-            <!-- Search & View Controls -->
             <div id="searchView">
-                <div class="max-w-xl mx-auto mb-4 flex gap-4 items-center">
-                    <input type="text" id="searchInput" class="game-input text-center flex-grow" placeholder="Search Name or ID">
+                <div class="max-w-xl mx-auto mb-4 flex flex-col sm:flex-row gap-4 items-center">
+                    <div class="flex-grow flex w-full">
+                        <input type="text" id="searchInput" class="game-input text-center flex-grow" placeholder="Search Name or ID" style="border-right-width: 0;">
+                        <button id="searchBtn" title="Search" class="game-btn p-3" style="border-left-width: 1px; box-shadow: 4px 4px 0px #212121;">
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clip-rule="evenodd" /></svg>
+                        </button>
+                    </div>
                     <div class="flex gap-2">
                         <button id="gridViewBtn" title="Grid View" class="game-btn p-3">
                             <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
                         </button>
                         <button id="listViewBtn" title="List View" class="game-btn p-3">
-                             <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10zm0 5.25a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75z" clip-rule="evenodd"></path></svg>
+                             <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10zm0 5.25a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 01-.75-.75z" clip-rule="evenodd"></path></svg>
                         </button>
                     </div>
                 </div>
                 <main id="results" class="gap-6"></main>
             </div>
-             <!-- Loader -->
-            <div id="loader" class="hidden text-center py-10"><div class="loader"></div></div>
+             <div id="loader" class="hidden text-center py-10"><div class="loader"></div></div>
         </div>
 
-        <!-- Footer for User ID -->
         <footer class="text-center mt-4"><p id="userIdDisplay" class="text-gray-500 text-xs"></p></footer>
     </div>
     
-    <!-- Image Modal -->
     <div id="imageModal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-black bg-opacity-70">
         <div class="relative max-w-lg max-h-full game-box p-2">
             <img id="modalImage" src="" alt="Pokémon Card Large View" class="w-full">
@@ -467,7 +508,6 @@
         </div>
     </div>
 
-    <!-- "My List" Slide-in Panel -->
     <div id="panel-overlay" class="fixed inset-0 bg-black/30 z-30 hidden"></div>
     <aside id="myListPanel" class="fixed top-0 right-0 h-full w-full max-w-md p-6 z-40 flex flex-col">
         <div class="flex justify-between items-center mb-6 pb-4 border-b-4 border-black">
@@ -477,7 +517,6 @@
         <div id="myListContainer" class="flex-grow overflow-y-auto pr-2 space-y-4"></div>
     </aside>
 
-    <!-- Toast Notification Container -->
     <div id="toast-container"></div>
 </body>
 </html>
