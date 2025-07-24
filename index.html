@@ -42,6 +42,7 @@
         const toggleAuthMode = document.getElementById('toggleAuthMode');
         const autocompleteResults = document.getElementById('autocomplete-results');
         const statusDisplay = document.getElementById('statusDisplay');
+        const closeListBtn = document.getElementById('closeListBtn'); // New reference for the close button
 
 
         // --- State and Config ---
@@ -215,7 +216,6 @@
         
         // --- Database Sync ---
         async function syncLocalDatabase() {
-            // Check localStorage cache first to avoid re-fetching the local file
             const storedDb = localStorage.getItem('pokemon-card-db');
             if (storedDb) {
                 try {
@@ -230,22 +230,20 @@
                 }
             }
 
-            // --- THIS IS THE KEY CHANGE ---
-            // Fetch the database file from the same folder as index.html
-            const dataUrl = './pokemon-tcg-db.json';
+            // !!! ACTION REQUIRED: REPLACE THIS URL WITH THE 'RAW' URL FROM YOUR GITHUB REPO !!!
+            const dataUrl = 'https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/pokemon-tcg-db.json';
 
             try {
-                showStatus('LOADING DATABASE...');
+                showStatus('SYNCING DATABASE...');
                 const response = await fetch(dataUrl);
-                if (!response.ok) throw new Error(`Could not find local DB file. Status: ${response.status}`);
+                if (!response.ok) throw new Error(`Network response was not ok. Status: ${response.status}`);
                 
                 localCardDatabase = await response.json();
                 localStorage.setItem('pokemon-card-db', JSON.stringify(localCardDatabase));
-                showStatus('DATABASE LOADED. READY!');
+                showStatus('DATABASE SYNCED. READY!');
             } catch (error) {
-                console.error('Database load failed:', error);
-                showStatus(`DB LOAD FAILED: ${error.message}`, true);
-                // Fallback to cached version if it exists
+                console.error('Database sync failed:', error);
+                showStatus(`DB SYNC FAILED: ${error.message}`, true);
                 if (storedDb) localCardDatabase = JSON.parse(storedDb);
             }
         }
@@ -491,6 +489,7 @@
         document.addEventListener('keydown', e => e.key === 'Escape' && !imageModal.classList.contains('hidden') && imageModal.classList.add('hidden'));
         showListBtn.addEventListener('click', () => toggleListPanel(true));
         panelOverlay.addEventListener('click', () => toggleListPanel(false));
+        closeListBtn.addEventListener('click', () => toggleListPanel(false)); // New event listener for close button
         gridViewBtn.addEventListener('click', () => setActiveView('grid'));
         listViewBtn.addEventListener('click', () => setActiveView('list'));
         logoutBtn.addEventListener('click', () => signOut(auth));
@@ -641,7 +640,7 @@
     <aside id="myListPanel" class="fixed top-0 right-0 h-full w-full max-w-md p-6 z-40 flex flex-col">
         <div class="flex justify-between items-center mb-6 pb-4 border-b-4 border-black">
             <h2 class="text-2xl font-bold">MY LIST</h2>
-            <button class="text-gray-600 hover:text-black transition-colors text-3xl" onclick="toggleListPanel(false)">[X]</button>
+            <button id="closeListBtn" class="text-gray-600 hover:text-black transition-colors text-3xl">[X]</button>
         </div>
         <div id="myListContainer" class="flex-grow overflow-y-auto pr-2 space-y-4"></div>
     </aside>
