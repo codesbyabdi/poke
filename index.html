@@ -14,25 +14,20 @@
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-                // --- Firebase Initialization ---
+        // --- Firebase Initialization ---
         const firebaseConfig = {
           apiKey: "AIzaSyBqKvL31__K5UZo-iwjO7uN5zPN4t8aDn4",
           authDomain: "poke-c7d03.firebaseapp.com",
           projectId: "poke-c7d03",
-          storageBucket: "poke-c7d03.appspot.com", // I've also corrected this for you
+          storageBucket: "poke-c7d03.appspot.com",
           messagingSenderId: "567243781113",
           appId: "1:567243781113:web:53c5a8e442b4967cdb4328"
         };
-        
+                
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        const appId = firebaseConfig.appId; // Use the appId from your new config
-
-        // Initialize Firebase
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
+        const appId = firebaseConfig.appId;
 
         // --- DOM References ---
         const searchInput = document.getElementById('searchInput');
