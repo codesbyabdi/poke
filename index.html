@@ -1,1 +1,425 @@
-<p1>hello</p1>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pokémon TCG Tracker - Retro UI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        /* --- Custom Styles & Animations --- */
+        html {
+            /* Smoother pixel font rendering */
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            image-rendering: -webkit-optimize-contrast; /* for crisp images */
+            image-rendering: pixelated;
+        }
+
+        body {
+            font-family: 'Press Start 2P', cursive;
+            background-color: #e0e0e0;
+            color: #212121;
+        }
+
+        /* The core "Game Box" style */
+        .game-box {
+            background-color: white;
+            border: 4px solid #212121;
+            box-shadow: 6px 6px 0px #212121;
+            transition: all 0.1s ease-in-out;
+        }
+
+        /* Button styles */
+        .game-btn {
+            background-color: white;
+            border: 3px solid #212121;
+            box-shadow: 4px 4px 0px #212121;
+            transition: all 0.1s ease-in-out;
+            text-transform: uppercase;
+            font-size: 14px;
+        }
+        .game-btn:hover {
+            background-color: #f0f0f0;
+        }
+        .game-btn:active {
+            box-shadow: 0px 0px 0px #212121;
+            transform: translate(4px, 4px);
+        }
+        .game-btn-primary {
+             background-color: #2979ff; /* blue */
+             color: white;
+        }
+        .game-btn-primary:hover {
+            background-color: #2962ff;
+        }
+        .game-btn-success {
+            background-color: #00c853; /* green */
+            color: white;
+        }
+        .game-btn-success:hover {
+            background-color: #00c853;
+        }
+        .game-btn-disabled {
+            background-color: #9e9e9e; /* gray */
+            color: #e0e0e0;
+            box-shadow: 0px 0px 0px #212121;
+            transform: translate(4px, 4px);
+        }
+
+        /* Input styles */
+        .game-input {
+            background-color: white;
+            border: 3px solid #212121;
+            font-size: 16px;
+            padding: 12px;
+            width: 100%;
+        }
+        .game-input:focus {
+            outline: none;
+            border-color: #2979ff;
+        }
+
+        /* Progress Bar */
+        .progress-container {
+            border: 3px solid #212121;
+            background-color: #e0e0e0;
+            padding: 4px;
+        }
+        .progress-bar-inner {
+            background-color: #2979ff; /* blue */
+            transition: width 0.5s ease-out;
+            height: 16px;
+        }
+
+        /* Loader Animation */
+        .loader {
+            width: 48px;
+            height: 48px;
+            border: 5px solid #212121;
+            border-bottom-color: transparent;
+            border-radius: 50%;
+            display: inline-block;
+            box-sizing: border-box;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Toast Notification */
+        #toast-container {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+        }
+        .toast {
+            background-color: #212121;
+            color: white;
+            padding: 20px;
+            border-top: 4px solid #9e9e9e;
+            animation: slide-up 0.3s ease-out, slide-down 0.3s ease-in 2.7s forwards;
+            font-size: 14px;
+            text-align: center;
+        }
+        @keyframes slide-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        @keyframes slide-down { from { transform: translateY(0); } to { transform: translateY(100%); } }
+
+        /* Slide-in Panel for "My List" */
+        #myListPanel {
+            border-left: 4px solid #212121;
+            background-color: #f0f0f0;
+            transition: transform 0.4s ease-in-out;
+            transform: translateX(100%);
+        }
+        #myListPanel.open {
+            transform: translateX(0);
+        }
+        #panel-overlay {
+            transition: opacity 0.4s ease-in-out;
+            backdrop-filter: blur(2px);
+        }
+    </style>
+</head>
+<body class="antialiased">
+
+    <div class="max-w-7xl mx-auto p-4 md:p-8 relative z-10">
+        <header class="text-center mb-10 p-4">
+            <h1 class="text-3xl md:text-4xl font-black mb-2 tracking-tighter">POKéMON TCG TRACKER</h1>
+        </header>
+
+        <div class="game-box p-4 md:p-6">
+            <div class="mb-6 pb-6 border-b-4 border-dashed border-gray-300">
+                <div class="flex flex-col sm:flex-row justify-between items-center gap-6">
+                    <div class="w-full sm:w-2/3">
+                        <div class="flex justify-between items-center mb-2 text-xs">
+                            <span class="font-semibold">PROGRESS</span>
+                            <span id="progressText" class="font-bold">0/1025</span>
+                        </div>
+                        <div class="progress-container">
+                            <div id="progressBar" class="progress-bar-inner" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <button id="showListBtn" class="w-full sm:w-auto game-btn py-3 px-6 text-sm">
+                        > MY LIST
+                    </button>
+                </div>
+            </div>
+
+            <div id="searchView">
+                <div class="max-w-xl mx-auto mb-6">
+                    <input type="text" id="searchInput" class="game-input text-center" placeholder="Search Name or ID">
+                </div>
+                <main id="results" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6"></main>
+            </div>
+             <div id="loader" class="hidden text-center py-10">
+                <div class="loader"></div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="imageModal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-black bg-opacity-70">
+        <div class="relative max-w-lg max-h-full game-box p-2">
+            <img id="modalImage" src="" alt="Pokémon Card Large View" class="w-full">
+            <button id="closeModal" class="absolute -top-4 -right-4 bg-red-500 text-white border-2 border-black h-10 w-10 font-mono text-2xl flex items-center justify-center hover:bg-red-600">[X]</button>
+        </div>
+    </div>
+
+    <div id="panel-overlay" class="fixed inset-0 bg-black/30 z-30 hidden" onclick="toggleListPanel(false)"></div>
+    <aside id="myListPanel" class="fixed top-0 right-0 h-full w-full max-w-md p-6 z-40 flex flex-col">
+        <div class="flex justify-between items-center mb-6 pb-4 border-b-4 border-black">
+            <h2 class="text-2xl font-bold">MY LIST</h2>
+            <button onclick="toggleListPanel(false)" class="text-gray-600 hover:text-black transition-colors text-3xl">[X]</button>
+        </div>
+        <div id="myListContainer" class="flex-grow overflow-y-auto pr-2 space-y-4">
+            </div>
+    </aside>
+
+    <div id="toast-container"></div>
+
+
+    <script>
+        // --- DOM References ---
+        const searchInput = document.getElementById('searchInput');
+        const resultsContainer = document.getElementById('results');
+        const loader = document.getElementById('loader');
+        const imageModal = document.getElementById('imageModal');
+        const modalImage = document.getElementById('modalImage');
+        const closeModalButton = document.getElementById('closeModal');
+        const progressText = document.getElementById('progressText');
+        const progressBar = document.getElementById('progressBar');
+        const showListBtn = document.getElementById('showListBtn');
+        const myListPanel = document.getElementById('myListPanel');
+        const panelOverlay = document.getElementById('panel-overlay');
+        const myListContainer = document.getElementById('myListContainer');
+        const toastContainer = document.getElementById('toast-container');
+
+        // --- State ---
+        const API_BASE_URL = 'https://api.pokemontcg.io/v2/cards';
+        const TOTAL_POKEMON = 1025;
+        let completionList = [];
+        
+        // --- Functions ---
+        
+        function showToast(message) {
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.innerHTML = message;
+            // Clear previous toasts before showing a new one
+            toastContainer.innerHTML = ''; 
+            toastContainer.appendChild(toast);
+        }
+
+        function toggleListPanel(open) {
+            if (open) {
+                renderCompletionList();
+                panelOverlay.classList.remove('hidden');
+                myListPanel.classList.add('open');
+            } else {
+                panelOverlay.classList.add('hidden');
+                myListPanel.classList.remove('open');
+            }
+        }
+        
+        function loadCompletionList() {
+            try {
+                const storedList = localStorage.getItem('pokemonCompletionList');
+                completionList = storedList ? JSON.parse(storedList) : [];
+            } catch (e) {
+                completionList = [];
+            }
+            updateProgress();
+        }
+
+        function saveCompletionList() {
+            localStorage.setItem('pokemonCompletionList', JSON.stringify(completionList));
+        }
+        
+        function updateProgress() {
+            const collectedCount = completionList.length;
+            const percentage = (collectedCount / TOTAL_POKEMON) * 100;
+            progressText.textContent = `${collectedCount}/${TOTAL_POKEMON} (${percentage.toFixed(1)}%)`;
+            progressBar.style.width = `${percentage}%`;
+        }
+
+        function addToList(card) {
+            const pokedexNumber = card.nationalPokedexNumbers?.[0];
+            if (!pokedexNumber) return;
+
+            if (!completionList.some(item => item.pokedex === pokedexNumber)) {
+                const newEntry = {
+                    pokedex: pokedexNumber,
+                    name: card.name.split('-')[0].trim(),
+                    image: card.images.small
+                };
+                completionList.push(newEntry);
+                saveCompletionList();
+                updateProgress();
+                updateCardButton(pokedexNumber, true);
+                if (myListPanel.classList.contains('open')) renderCompletionList();
+                showToast(`Registered ${newEntry.name} to the list!`);
+            }
+        }
+
+        function removeFromList(pokedexNumber) {
+            const removedItem = completionList.find(item => item.pokedex === pokedexNumber);
+            completionList = completionList.filter(item => item.pokedex !== pokedexNumber);
+            saveCompletionList();
+            updateProgress();
+            renderCompletionList();
+            updateCardButton(pokedexNumber, false);
+            if (removedItem) {
+                showToast(`${removedItem.name} was removed from the list.`);
+            }
+        }
+        
+        function updateCardButton(pokedexNumber, isCollected) {
+             const button = document.querySelector(`.card-btn[data-pokedex='${pokedexNumber}']`);
+             if (button) {
+                button.disabled = isCollected;
+                if (isCollected) {
+                    button.textContent = 'COLLECTED';
+                    button.className = 'w-full mt-2 game-btn game-btn-success py-2 px-2 text-xs';
+                } else {
+                    button.textContent = '> ADD';
+                    button.className = 'w-full mt-2 game-btn game-btn-primary py-2 px-2 text-xs';
+                }
+             }
+        }
+
+        function renderCompletionList() {
+            myListContainer.innerHTML = '';
+            if (completionList.length === 0) {
+                myListContainer.innerHTML = `<div class="text-center p-4 text-gray-500">Your list is empty...</div>`;
+                return;
+            }
+            const sortedList = [...completionList].sort((a, b) => a.pokedex - b.pokedex);
+            sortedList.forEach(item => {
+                const listItem = document.createElement('div');
+                listItem.className = 'flex items-center justify-between p-2 bg-white border-2 border-black';
+                listItem.innerHTML = `
+                    <div class="flex items-center gap-4">
+                        <img src="${item.image}" alt="${item.name}" class="w-10 h-14 object-cover border-2 border-black">
+                        <div>
+                            <p class="font-bold text-sm">${item.name}</p>
+                            <p class="text-xs text-gray-500">#${String(item.pokedex).padStart(3, '0')}</p>
+                        </div>
+                    </div>
+                    <button class="remove-btn text-red-500 hover:text-red-700 text-2xl" data-pokedex="${item.pokedex}">[X]</button>`;
+                listItem.querySelector('.remove-btn').onclick = () => removeFromList(item.pokedex);
+                myListContainer.appendChild(listItem);
+            });
+        }
+        
+        function showMessage(msg) {
+            resultsContainer.innerHTML = `<div class="col-span-full text-center py-10"><p class="text-gray-500">${msg}</p></div>`;
+        }
+
+        function toggleLoader(isLoading) {
+            loader.style.display = isLoading ? 'block' : 'none';
+            if (isLoading) resultsContainer.innerHTML = '';
+        }
+
+        async function searchCards() {
+            const query = searchInput.value.trim();
+            if (!query) return;
+            toggleLoader(true);
+            const isPokedexNumber = /^\d+$/.test(query);
+            const apiQuery = isPokedexNumber ? `nationalPokedexNumbers:${query}` : `name:"${query}*"`;
+            try {
+                const response = await fetch(`${API_BASE_URL}?q=${apiQuery}&orderBy=set.releaseDate&pageSize=18`);
+                if (!response.ok) throw new Error(`API Error: ${response.status}`);
+                const data = await response.json();
+                displayCards(data.data || []);
+            } catch (error) {
+                showMessage('An error occurred. Try again.');
+            } finally {
+                toggleLoader(false);
+            }
+        }
+
+        function displayCards(cards) {
+            if(cards.length === 0) {
+                showMessage(`No cards found for "${searchInput.value.trim()}".`);
+                return;
+            }
+            resultsContainer.innerHTML = '';
+            cards.forEach((card) => {
+                const pokedexNumber = card.nationalPokedexNumbers?.[0];
+                const isCollected = pokedexNumber ? completionList.some(item => item.pokedex === pokedexNumber) : false;
+                
+                const cardElement = document.createElement('div');
+                cardElement.className = 'text-center';
+
+                const cardContent = `
+                    <img src="${card.images.small}" alt="${card.name}" class="w-full border-4 border-black cursor-pointer hover:border-blue-500 transition-colors" loading="lazy">
+                    <div class="mt-2 text-xs">
+                        <p class="font-bold truncate">${card.name}</p>
+                    </div>
+                `;
+                cardElement.innerHTML = cardContent;
+                
+                if (pokedexNumber) {
+                    const addButton = document.createElement('button');
+                    addButton.dataset.pokedex = pokedexNumber;
+                    addButton.disabled = isCollected;
+                    addButton.className = 'w-full mt-2 game-btn py-2 px-2 text-xs card-btn';
+                    if (isCollected) {
+                        addButton.textContent = 'COLLECTED';
+                        addButton.classList.add('game-btn-success');
+                    } else {
+                        addButton.textContent = '> ADD';
+                        addButton.classList.add('game-btn-primary');
+                    }
+                    addButton.onclick = (e) => addToList(card);
+                    cardElement.appendChild(addButton);
+                }
+                
+                cardElement.querySelector('img').addEventListener('click', () => {
+                    modalImage.src = card.images.large;
+                    imageModal.classList.remove('hidden');
+                });
+                resultsContainer.appendChild(cardElement);
+            });
+        }
+        
+        // --- Event Listeners ---
+        searchInput.addEventListener('keyup', e => e.key === 'Enter' && searchCards());
+        closeModalButton.addEventListener('click', () => imageModal.classList.add('hidden'));
+        document.addEventListener('keydown', e => e.key === 'Escape' && !imageModal.classList.contains('hidden') && imageModal.classList.add('hidden'));
+        showListBtn.addEventListener('click', () => toggleListPanel(true));
+
+        // --- Initial Load ---
+        window.onload = () => {
+            loadCompletionList();
+            searchInput.value = 'Pikachu';
+            searchCards();
+        };
+    </script>
+</body>
+</html>
