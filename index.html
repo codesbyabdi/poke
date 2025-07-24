@@ -45,14 +45,14 @@
 
 
         // --- State and Config ---
-        const TOTAL_POKEMON = 1025; 
+        const TOTAL_POKEMON_SPECIES = 1025; 
         let completionList = [];
         let currentUser = null;
         let unsubscribeFromCollection = null;
         let currentView = 'grid';
         let lastDisplayedCards = [];
+        let localCardDatabase = [];
         let isRegistering = false;
-        let localPokemonNameIndex = []; // Will be populated from embedded data
 
         // --- Firebase Initialization ---
         const firebaseConfig = {
@@ -93,9 +93,10 @@
         }
         
         function updateProgress() {
-            const collectedCount = new Set(completionList.map(item => item.pokedex)).size;
-            const percentage = (collectedCount / TOTAL_POKEMON) * 100;
-            progressText.textContent = `${collectedCount}/${TOTAL_POKEMON} (${percentage.toFixed(1)}%)`;
+            const collectedPokedexNumbers = new Set(completionList.map(item => item.pokedex));
+            const collectedCount = collectedPokedexNumbers.size;
+            const percentage = (collectedCount / TOTAL_POKEMON_SPECIES) * 100;
+            progressText.textContent = `${collectedCount}/${TOTAL_POKEMON_SPECIES} (${percentage.toFixed(1)}%)`;
             progressBar.style.width = `${percentage}%`;
         }
 
@@ -109,10 +110,10 @@
         function showStatus(message, isError = false) {
             statusDisplay.textContent = message;
             statusDisplay.classList.toggle('text-red-500', isError);
-            if (!message && !isError) {
+             if (!message && !isError) {
                  setTimeout(() => { 
                     if(statusDisplay.textContent === message) statusDisplay.textContent = ''
-                 }, 2000);
+                 }, 3000);
             }
         }
 
@@ -136,7 +137,7 @@
                 completionList = docSnap.exists() ? docSnap.data().list || [] : [];
                 updateProgress();
                 if (myListPanel.classList.contains('open')) renderCompletionList();
-                displayCards(lastDisplayedCards); // Re-render to update buttons
+                displayCards(lastDisplayedCards);
             }, (error) => {
                 console.error("Error listening to collection:", error);
                 showToast("CONNECTION LOST! Check console (F12).");
@@ -152,27 +153,28 @@
             const pokedexNumber = card.nationalPokedexNumbers?.[0];
             if (!pokedexNumber) return;
 
-            if (!completionList.some(item => item.pokedex === pokedexNumber)) {
+            if (!completionList.some(item => item.id === card.id)) {
                 const newEntry = {
+                    id: card.id,
                     pokedex: pokedexNumber,
-                    name: card.name.split('-')[0].trim(),
-                    image: card.images.small
+                    name: card.name,
+                    image: `https://images.pokemontcg.io/${card.set.id}/${card.number}.png`
                 };
                 completionList.push(newEntry);
                 await saveCollectionToFirestore();
-                showToast(`Registered ${newEntry.name} to your list!`);
+                showToast(`Added ${card.name} to your list!`);
             }
         }
 
-        async function removeFromList(pokedexNumber) {
+        async function removeFromList(cardId) {
             if (!currentUser) return;
-            const removedItem = completionList.find(item => item.pokedex === pokedexNumber);
-            completionList = completionList.filter(item => item.pokedex !== pokedexNumber);
+            const removedItem = completionList.find(item => item.id === cardId);
+            completionList = completionList.filter(item => item.id !== cardId);
             await saveCollectionToFirestore();
             if (removedItem) showToast(`${removedItem.name} was removed from the list.`);
         }
         
-        function updateCardButton(pokedexNumber, isCollected, button) {
+        function updateCardButton(card, isCollected, button) {
             button.disabled = isCollected;
             button.className = 'w-full mt-2 game-btn py-2 px-2 text-xs card-btn';
             if (currentView === 'list') {
@@ -193,7 +195,7 @@
                 myListContainer.innerHTML = `<div class="text-center p-4 text-gray-500">Your list is empty...</div>`;
                 return;
             }
-            const sortedList = [...completionList].sort((a, b) => a.pokedex - b.pokedex);
+            const sortedList = [...completionList].sort((a, b) => a.pokedex - b.pokedex || a.name.localeCompare(b.name));
             sortedList.forEach(item => {
                 const listItem = document.createElement('div');
                 listItem.className = 'flex items-center justify-between p-2 bg-white border-2 border-black';
@@ -206,72 +208,90 @@
                         </div>
                     </div>
                     <button class="remove-btn text-red-500 hover:text-red-700 text-2xl">[X]</button>`;
-                listItem.querySelector('.remove-btn').onclick = () => removeFromList(item.pokedex);
+                listItem.querySelector('.remove-btn').onclick = () => removeFromList(item.id);
                 myListContainer.appendChild(listItem);
             });
         }
         
-        // --- HYBRID SEARCH: Autocomplete from Local, Search from API ---
-        
-        // INSTANT: Get suggestions from the embedded name index
+        // --- Database Sync ---
+        async function syncLocalDatabase() {
+            // Check localStorage cache first to avoid re-fetching the local file
+            const storedDb = localStorage.getItem('pokemon-card-db');
+            if (storedDb) {
+                try {
+                    localCardDatabase = JSON.parse(storedDb);
+                    if (localCardDatabase && localCardDatabase.length > 5000) {
+                         showStatus('DATABASE LOADED FROM CACHE');
+                         return;
+                    }
+                } catch (e) {
+                    console.error("Could not parse cached DB, refetching...", e);
+                    localStorage.removeItem('pokemon-card-db');
+                }
+            }
+
+            // --- THIS IS THE KEY CHANGE ---
+            // Fetch the database file from the same folder as index.html
+            const dataUrl = './pokemon-tcg-db.json';
+
+            try {
+                showStatus('LOADING DATABASE...');
+                const response = await fetch(dataUrl);
+                if (!response.ok) throw new Error(`Could not find local DB file. Status: ${response.status}`);
+                
+                localCardDatabase = await response.json();
+                localStorage.setItem('pokemon-card-db', JSON.stringify(localCardDatabase));
+                showStatus('DATABASE LOADED. READY!');
+            } catch (error) {
+                console.error('Database load failed:', error);
+                showStatus(`DB LOAD FAILED: ${error.message}`, true);
+                // Fallback to cached version if it exists
+                if (storedDb) localCardDatabase = JSON.parse(storedDb);
+            }
+        }
+
+        // --- Local Search from Synced DB ---
         function getAutocompleteSuggestions(query) {
-            if (!query || localPokemonNameIndex.length === 0) {
+            if (!query || localCardDatabase.length === 0) {
                 displayAutocomplete([]);
                 return;
             }
             const lowerCaseQuery = query.toLowerCase();
-            const suggestions = localPokemonNameIndex
-                .filter(name => name.toLowerCase().startsWith(lowerCaseQuery))
-                .slice(0, 5); // Limit to 5 suggestions
+            const suggestions = localCardDatabase
+                .filter(card => card.name.toLowerCase().startsWith(lowerCaseQuery))
+                .map(card => card.name);
             
-            displayAutocomplete(suggestions);
+            const uniqueNames = [...new Set(suggestions)].slice(0, 5);
+            displayAutocomplete(uniqueNames);
         }
 
-        // LIVE: Fetch all variants of a specific card from the API
-        async function searchApiForVariants(query) {
-             if (!query) {
+        function searchLocalDatabase(query) {
+            if (!query || localCardDatabase.length === 0) {
                 resultsContainer.innerHTML = '';
                 lastDisplayedCards = [];
                 return;
             }
             
-            showStatus('SEARCHING...');
-            resultsContainer.innerHTML = ''; 
-
             const isPokedexNumber = /^\d+$/.test(query);
-            let apiQuery;
+            const lowerCaseQuery = query.toLowerCase();
+
+            let results;
             if (isPokedexNumber) {
-                apiQuery = `nationalPokedexNumbers:${query}`;
+                const pokedexNumber = parseInt(query, 10);
+                results = localCardDatabase.filter(card => card.nationalPokedexNumbers?.includes(pokedexNumber));
             } else {
-                // Use quotes for an exact name match to get ALL variants
-                apiQuery = `name:"${query}"`;
+                results = localCardDatabase.filter(card => card.name.toLowerCase().includes(lowerCaseQuery));
             }
+            
+            lastDisplayedCards = results;
+            displayCards(lastDisplayedCards);
 
-            try {
-                // OPTIMIZED: Use the 'select' parameter to request only necessary data
-                const selectFields = 'id,name,images,nationalPokedexNumbers';
-                const response = await fetch(`https://api.pokemontcg.io/v2/cards?q=${apiQuery}&pageSize=60&orderBy=set.releaseDate&select=${selectFields}`);
-                
-                if (!response.ok) {
-                   throw new Error(`API Error: ${response.status}`);
-                }
-                
-                const data = await response.json();
-                lastDisplayedCards = data.data || [];
-                displayCards(lastDisplayedCards);
-                
-                if(lastDisplayedCards.length === 0) {
-                    showStatus(`No cards found for "${query}".`, true);
-                } else {
-                    showStatus('');
-                }
-
-            } catch (error) {
-                console.error("Card search error:", error);
-                showStatus('SEARCH FAILED. Please try again.', true);
+            if(lastDisplayedCards.length === 0){
+                showStatus(`No cards found for "${query}".`, true);
+            } else {
+                showStatus(`${lastDisplayedCards.length} cards found.`);
             }
         }
-
 
         // --- Display Functions ---
         function displayAutocomplete(names) {
@@ -287,7 +307,7 @@
                 item.onclick = () => {
                     searchInput.value = name;
                     autocompleteResults.classList.add('hidden');
-                    searchApiForVariants(name); // Perform main search on click
+                    searchLocalDatabase(name);
                 };
                 autocompleteResults.appendChild(item);
             });
@@ -299,7 +319,7 @@
             if (cards.length === 0) {
                 return;
             }
-             showStatus('');
+             
             if (currentView === 'grid') {
                 resultsContainer.className = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6';
                 cards.forEach(displayCardAsGrid);
@@ -313,15 +333,17 @@
             const cardElement = document.createElement('div');
             cardElement.innerHTML = template;
 
-            const pokedexNumber = card.nationalPokedexNumbers?.[0];
-            const isCollected = currentUser && pokedexNumber ? completionList.some(item => item.pokedex === pokedexNumber) : false;
+            const isCollected = currentUser && completionList.some(item => item.id === card.id);
 
             const img = cardElement.querySelector('.card-image');
             const imageContainer = cardElement.querySelector('.img-placeholder');
             
+            const smallImageUrl = `https://images.pokemontcg.io/${card.set.id}/${card.number}.png`;
+            const largeImageUrl = `https://images.pokemontcg.io/${card.set.id}/${card.number}_hires.png`;
+
             if(img && imageContainer) {
                 const imageLoader = new Image();
-                imageLoader.src = card.images.small;
+                imageLoader.src = smallImageUrl;
                 imageLoader.onload = () => {
                     img.src = imageLoader.src;
                     img.classList.remove('opacity-0');
@@ -334,14 +356,14 @@
             
             if (img) {
                 img.addEventListener('click', () => {
-                    modalImage.src = card.images.large;
+                    modalImage.src = largeImageUrl;
                     imageModal.classList.remove('hidden');
                 });
             }
 
             const addButton = cardElement.querySelector('.card-btn');
-            if (pokedexNumber && addButton) {
-                updateCardButton(pokedexNumber, isCollected, addButton);
+            if (card.nationalPokedexNumbers && addButton) {
+                updateCardButton(card, isCollected, addButton);
                 addButton.onclick = () => addToList(card);
             } else if (addButton) {
                 addButton.remove();
@@ -354,12 +376,12 @@
             const template = `
                 <div class="text-center">
                     <div class="img-placeholder">
-                        <img src="${card.images.small}" alt="${card.name}" class="card-image w-full border-4 border-black cursor-pointer opacity-0 transition-opacity duration-500" loading="lazy">
+                        <img alt="${card.name}" class="card-image w-full border-4 border-black cursor-pointer opacity-0 transition-opacity duration-500" loading="lazy">
                     </div>
                     <div class="mt-2 text-xs">
                         <p class="font-bold truncate">${card.name}</p>
                     </div>
-                    <button data-pokedex="${card.nationalPokedexNumbers?.[0]}" class="card-btn"></button>
+                    <button data-card-id="${card.id}" class="card-btn"></button>
                 </div>
             `;
             const cardElement = createCardElement(card, template);
@@ -367,16 +389,17 @@
         }
         
         function displayCardAsList(card) {
+            const smallImageUrl = `https://images.pokemontcg.io/${card.set.id}/${card.number}.png`;
             const template = `
                 <div class="game-box p-3 flex flex-col sm:flex-row items-center gap-4">
-                     <div class="img-placeholder w-20 h-28 flex-shrink-0">
-                        <img src="${card.images.small}" alt="${card.name}" class="card-image w-20 h-28 object-cover border-2 border-black cursor-pointer opacity-0 transition-opacity duration-500" loading="lazy">
+                    <div class="img-placeholder w-20 h-28 flex-shrink-0">
+                        <img src="${smallImageUrl}" alt="${card.name}" class="card-image w-20 h-28 object-cover border-2 border-black cursor-pointer opacity-0 transition-opacity duration-500" loading="lazy">
                     </div>
                     <div class="flex-grow text-center sm:text-left">
                         <p class="font-bold text-base">${card.name}</p>
                         <p class="text-xs text-gray-500">#${String(card.nationalPokedexNumbers?.[0] || 'N/A').padStart(3, '0')}</p>
                     </div>
-                    <button data-pokedex="${card.nationalPokedexNumbers?.[0]}" class="card-btn"></button>
+                    <button data-card-id="${card.id}" class="card-btn"></button>
                 </div>
             `;
             const cardElement = createCardElement(card, template);
@@ -423,23 +446,12 @@
                 logoutBtn.classList.remove('hidden');
                 showListBtn.disabled = false;
                 
-                const dbScript = document.getElementById('pokemon-name-index');
-                if (dbScript) {
-                    try {
-                        localPokemonNameIndex = JSON.parse(dbScript.textContent);
-                    } catch (e) {
-                        showStatus('NAME INDEX FAILED!', true);
-                        return;
-                    }
-                } else {
-                    showStatus('NAME INDEX NOT FOUND!', true);
-                    return;
-                }
+                await syncLocalDatabase();
                 
                 searchInput.disabled = false;
                 searchInput.placeholder = "Search Name or Pokédex Nr.";
                 listenToCollection(user.uid);
-                searchApiForVariants('Pikachu');
+                searchLocalDatabase('Pikachu');
             } else {
                 currentUser = null;
                 completionList = [];
@@ -453,6 +465,7 @@
                 searchInput.disabled = true;
                 searchInput.placeholder = "Please log in...";
                 resultsContainer.innerHTML = '';
+                lastDisplayedCards = [];
             }
         }
 
@@ -464,7 +477,7 @@
         searchInput.addEventListener('keyup', e => {
             if (e.key === 'Enter') {
                 autocompleteResults.classList.add('hidden');
-                searchApiForVariants(searchInput.value.trim());
+                searchLocalDatabase(searchInput.value.trim());
             }
         });
 
@@ -634,37 +647,5 @@
     </aside>
 
     <div id="toast-container"></div>
-    
-    <!-- EMBEDDED POKEMON NAME INDEX -->
-    <script id="pokemon-name-index" type="application/json">
-        [
-            "Abomasnow", "Abra", "Absol", "Accelgor", "Aegislash", "Aerodactyl", "Aggron", "Aipom", "Alakazam", "Alomomola", "Altaria", "Amaura", "Ambipom", "Amoonguss", "Ampharos", "Anorith", "Arbok", "Arcanine", "Arceus", "Archen", "Archeops", "Ariados", "Armaldo", "Aromatisse", "Aron", "Articuno", "Audino", "Aurorus", "Avalugg", "Axew", "Azelf", "Azumarill", "Azurill",
-            "Bagon", "Baltoy", "Banette", "Barbaracle", "Barboach", "Basculin", "Bastiodon", "Bayleef", "Beartic", "Beautifly", "Beedrill", "Beheeyem", "Beldum", "Bellossom", "Bellsprout", "Bergmite", "Bibarel", "Bidoof", "Binacle", "Bisharp", "Blastoise", "Blaziken", "Blissey", "Blitzle", "Boldore", "Bonsly", "Bouffalant", "Braviary", "Breloom", "Bronzong", "Bronzor", "Budew", "Buizel", "Bulbasaur", "Buneary", "Bunnelby", "Burmy",
-            "Cacnea", "Cacturne", "Camerupt", "Carbink", "Carnivine", "Carracosta", "Carvanha", "Cascoon", "Castform", "Caterpie", "Celebi", "Chandelure", "Chansey", "Charizard", "Charmander", "Charmeleon", "Chatot", "Cherrim", "Cherubi", "Chesnaught", "Chespin", "Chikorita", "Chimchar", "Chimecho", "Chinchou", "Chingling", "Cinccino", "Clamperl", "Clauncher", "Clawitzer", "Claydol", "Clefable", "Clefairy", "Cleffa", "Cloyster", "Cobalion", "Cofagrigus", "Combee", "Combusken", "Conkeldurr", "Corphish", "Corsola", "Cottonee", "Cradily", "Cranidos", "Crawdaunt", "Cresselia", "Croagunk", "Crobat", "Croconaw", "Crustle", "Cryogonal", "Cubchoo", "Cubone", "Cyndaquil",
-            "Darkrai", "Darmanitan", "Darumaka", "Dedenne", "Deerling", "Deino", "Delcatty", "Delibird", "Delphox", "Deoxys", "Dewgong", "Dewott", "Dialga", "Diancie", "Diggersby", "Diglett", "Ditto", "Dodrio", "Doduo", "Donphan", "Doublade", "Dragalge", "Dragonair", "Dragonite", "Drapion", "Dratini", "Drifblim", "Drifloon", "Drilbur", "Drowzee", "Druddigon", "Ducklett", "Dugtrio", "Dunsparce", "Duosion", "Durant", "Dusclops", "Dusknoir", "Duskull", "Dustox", "Dwebble",
-            "Eelektrik", "Eelektross", "Eevee", "Ekans", "Electabuzz", "Electivire", "Electrike", "Electrode", "Elekid", "Elgyem", "Emboar", "Emolga", "Empoleon", "Entei", "Escavalier", "Espeon", "Espurr", "Exeggcute", "Exeggutor", "Exploud", "Excadrill",
-            "Farfetch'd", "Fearow", "Feebas", "Fennekin", "Feraligatr", "Ferroseed", "Ferrothorn", "Finneon", "Flaaffy", "Flabébé", "Flareon", "Fletchinder", "Fletchling", "Floatzel", "Floette", "Florges", "Flygon", "Foongus", "Forretress", "Fraxure", "Frillish", "Froakie", "Frogadier", "Froslass", "Furfrou",
-            "Gabite", "Gallade", "Galvantula", "Garbodor", "Garchomp", "Gardevoir", "Gastly", "Gastrodon", "Genesect", "Gengar", "Geodude", "Gible", "Gigalith", "Girafarig", "Glaceon", "Glalie", "Glameow", "Gligar", "Gliscor", "Gloom", "Gogoat", "Golbat", "Goldeen", "Golduck", "Golem", "Golett", "Golisopod", "Golurk", "Goodra", "Goomy", "Gorebyss", "Gothita", "Gothitelle", "Gothorita", "Gourgeist", "Granbull", "Graveler", "Greninja", "Grimer", "Grotle", "Groudon", "Grovyle", "Growlithe", "Grumpig", "Gulpin", "Gurdurr", "Gyarados",
-            "Happiny", "Hariyama", "Haunter", "Hawlucha", "Haxorus", "Heatmor", "Heatran", "Heliolisk", "Helioptile", "Heracross", "Herdier", "Hippopotas", "Hippowdon", "Hitmonchan", "Hitmonlee", "Hitmontop", "Honchkrow", "Honedge", "Ho-Oh", "Hoothoot", "Hoppip", "Horsea", "Houndoom", "Houndour", "Huntail", "Hydreigon", "Hypno",
-            "Igglybuff", "Illumise", "Infernape", "Inkay", "Ivysaur",
-            "Jellicent", "Jigglypuff", "Jirachi", "Jolteon", "Joltik", "Jumpluff", "Jynx",
-            "Kabuto", "Kabutops", "Kadabra", "Kakuna", "Kangaskhan", "Karrablast", "Kecleon", "Keldeo", "Kingdra", "Kingler", "Kirlia", "Klang", "Klefki", "Klink", "Klinklang", "Koffing", "Krabby", "Kricketot", "Kricketune", "Krokorok", "Krookodile", "Kyogre", "Kyurem",
-            "Lairon", "Lampent", "Lanturn", "Lapras", "Larvesta", "Larvitar", "Latias", "Latios", "Leafeon", "Leavanny", "Ledian", "Ledyba", "Lickilicky", "Lickitung", "Liepard", "Lileep", "Lilligant", "Lillipup", "Linoone", "Litleo", "Litwick", "Lombre", "Lopunny", "Lotad", "Loudred", "Lucario", "Ludicolo", "Lugia", "Lumineon", "Lunatone", "Luvdisc", "Luxio", "Luxray",
-            "Machamp", "Machoke", "Machop", "Magby", "Magcargo", "Magikarp", "Magmar", "Magmortar", "Magnemite", "Magneton", "Magnezone", "Makuhita", "Malamar", "Mamoswine", "Manaphy", "Mandibuzz", "Manectric", "Mankey", "Mantine", "Mantyke", "Maractus", "Mareep", "Marill", "Marowak", "Marshtomp", "Masquerain", "Mawile", "Medicham", "Meditite", "Meganium", "Meloetta", "Meowstic", "Meowth", "Mesprit", "Metagross", "Metang", "Metapod", "Mew", "Mewtwo", "Mienfoo", "Mienshao", "Mightyena", "Milotic", "Miltank", "Mime Jr.", "Minccino", "Minun", "Misdreavus", "Mismagius", "Moltres", "Monferno", "Morelull", "Mothim", "Mr. Mime", "Mudkip", "Muk", "Munchlax", "Munna", "Murkrow", "Musharna",
-            "Natu", "Necrozma", "Nidoking", "Nidoqueen", "Nidoran♀", "Nidoran♂", "Nidorina", "Nidorino", "Nincada", "Ninetales", "Ninjask", "Noctowl", "Noibat", "Noivern", "Nosepass", "Numel", "Nuzleaf",
-            "Octillery", "Oddish", "Omanyte", "Omastar", "Onix", "Oshawott",
-            "Pachirisu", "Palkia", "Palpitoad", "Pancham", "Pangoro", "Panpour", "Pansage", "Pansear", "Paras", "Parasect", "Patrat", "Pawniard", "Pelipper", "Persian", "Petilil", "Phanpy", "Phantump", "Phione", "Pichu", "Pidgeot", "Pidgeotto", "Pidgey", "Pidove", "Pignite", "Pikachu", "Piloswine", "Pineco", "Pinsir", "Piplup", "Plusle", "Politoed", "Poliwag", "Poliwhirl", "Poliwrath", "Ponyta", "Poochyena", "Porygon", "Porygon2", "Porygon-Z", "Primeape", "Prinplup", "Probopass", "Psyduck", "Pupitar", "Purrloin", "Purugly", "Pyroar",
-            "Quagsire", "Quilava", "Quilladin", "Qwilfish",
-            "Raichu", "Raikou", "Ralts", "Rampardos", "Rapidash", "Raticate", "Rattata", "Rayquaza", "Regice", "Regigigas", "Regirock", "Registeel", "Relicanth", "Remoraid", "Reshiram", "Reuniclus", "Rhydon", "Rhyhorn", "Rhyperior", "Riolu", "Roggenrola", "Roselia", "Roserade", "Rotom", "Rufflet",
-            "Sableye", "Salamence", "Samurott", "Sandile", "Sandshrew", "Sandslash", "Sawk", "Sawsbuck", "Scatterbug", "Sceptile", "Scizor", "Scolipede", "Scrafty", "Scraggy", "Scyther", "Seadra", "Seaking", "Sealeo", "Seedot", "Seel", "Seismitoad", "Sentret", "Serperior", "Servine", "Seviper", "Sewaddle", "Sharpedo", "Shaymin", "Shedinja", "Shelgon", "Shellder", "Shelmet", "Shieldon", "Shiftry", "Shiinotic", "Shinx", "Shroomish", "Shuckle", "Shuppet", "Sigilyph", "Silcoon", "Simipour", "Simisage", "Simisear", "Skarmory", "Skiddo", "Skiploom", "Skitty", "Skorupi", "Skrelp", "Skuntank", "Slaking", "Slakoth", "Sliggoo", "Slowbro", "Slowking", "Slowpoke", "Slugma", "Slurpuff", "Smeargle", "Smoochum", "Sneasel", "Snivy", "Snorlax", "Snorunt", "Snover", "Snubbull", "Solosis", "Solrock", "Spearow", "Spewpa", "Spheal", "Spinarak", "Spinda", "Spiritomb", "Spoink", "Spritzee", "Squirtle", "Stantler", "Staraptor", "Staravia", "Starly", "Starmie", "Staryu", "Steelix", "Stoutland", "Stunfisk", "Stunky", "Sudowoodo", "Suicune", "Sunflora", "Sunkern", "Surskit", "Swablu", "Swadloon", "Swalot", "Swampert", "Swanna", "Swellow", "Swinub", "Swirlix", "Swoobat", "Sylveon",
-            "Taillow", "Talonflame", "Tangela", "Tangrowth", "Tauros", "Teddiursa", "Tentacool", "Tentacruel", "Tepig", "Terrakion", "Throh", "Thundurus", "Timburr", "Tirtouga", "Togekiss", "Togepi", "Togetic", "Torchic", "Torkoal", "Tornadus", "Torterra", "Totodile", "Toxicroak", "Tranquill", "Trapinch", "Trevenant", "Tropius", "Trubbish", "Turtwig", "Tympole", "Tynamo", "Typhlosion", "Tyranitar", "Tyrantrum", "Tyrogue", "Tyrunt",
-            "Umbreon", "Unfezant", "Unown", "Ursaring",
-            "Vanillish", "Vanillite", "Vanilluxe", "Vaporeon", "Venipede", "Venomoth", "Venonat", "Venusaur", "Vespiquen", "Vibrava", "Victini", "Victreebel", "Vigoroth", "Vileplume", "Virizion", "Vivillon", "Volbeat", "Volcarona", "Voltorb", "Vullaby", "Vulpix",
-            "Wailmer", "Wailord", "Walrein", "Wartortle", "Watchog", "Weavile", "Weedle", "Weepinbell", "Weezing", "Whimsicott", "Whirlipede", "Whiscash", "Whismur", "Wigglytuff", "Wingull", "Wobbuffet", "Woobat", "Wooper", "Wormadam", "Wurmple", "Wynaut",
-            "Xatu", "Xerneas",
-            "Yamask", "Yanma", "Yanmega", "Yveltal",
-            "Zangoose", "Zapdos", "Zebstrika", "Zekrom", "Zigzagoon", "Zoroark", "Zorua", "Zubat", "Zweilous"
-        ]
-    </script>
 </body>
 </html>
