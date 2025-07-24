@@ -53,6 +53,7 @@
         let currentView = 'grid'; // 'grid' or 'list'
         let lastDisplayedCards = []; // To redraw on view change
         const searchCache = {}; // Cache for search results
+        let isInitialLoad = true; // Flag to handle the first search
 
         // --- Toast Notifications ---
         function showToast(message) {
@@ -349,7 +350,7 @@
             resultsContainer.appendChild(cardElement);
         }
         
-        // --- Authentication and Initialization ---
+        // --- Authentication and Initialization (REVISED) ---
         function handleAuthState(user) {
              if (user) {
                 currentUser = user;
@@ -361,10 +362,14 @@
                 updateProgress();
                 userIdDisplay.textContent = 'Sign-in required to save progress';
             }
-            // Perform the initial search after auth state is determined
-            const initialQuery = searchInput.value || 'Pikachu';
-            searchInput.value = initialQuery;
-            searchCards(initialQuery);
+
+            // This flag ensures the initial search only runs ONCE.
+            if (isInitialLoad) {
+                isInitialLoad = false; // Turn off the flag
+                const initialQuery = searchInput.value || 'Pikachu';
+                searchInput.value = initialQuery;
+                searchCards(initialQuery);
+            }
         }
 
         // --- Search Logic ---
@@ -381,7 +386,6 @@
             if (query) {
                 searchTimeout = setTimeout(() => searchCards(query), 500);
             } else {
-                // Clear everything if input is empty
                 toggleLoader(false);
                 resultsContainer.innerHTML = '';
                 lastDisplayedCards = [];
@@ -401,16 +405,17 @@
         gridViewBtn.addEventListener('click', () => setActiveView('grid'));
         listViewBtn.addEventListener('click', () => setActiveView('list'));
 
-        // --- Initial Load ---
-        async function main() {
-            try {
-                await signInAnonymously(auth);
-            } catch (error) {
-                console.error("Anonymous sign-in failed. This can happen in incognito/private mode.", error);
-                handleAuthState(null);
-            }
-            setActiveView('grid');
+        // --- Initial Load (REVISED) ---
+        function main() {
+            // Set the listener as the single source of truth for auth changes
             onAuthStateChanged(auth, handleAuthState);
+            
+            // Attempt to sign in. The listener will handle the result.
+            signInAnonymously(auth).catch(error => {
+                console.error("Anonymous sign-in failed. This can happen in private/incognito mode.", error);
+            });
+            
+            setActiveView('grid');
         }
 
         main();
