@@ -93,7 +93,7 @@
         }
         
         function updateProgress() {
-            const collectedCount = completionList.length;
+            const collectedCount = new Set(completionList.map(item => item.pokedex)).size;
             const percentage = (collectedCount / TOTAL_POKEMON) * 100;
             progressText.textContent = `${collectedCount}/${TOTAL_POKEMON} (${percentage.toFixed(1)}%)`;
             progressBar.style.width = `${percentage}%`;
@@ -201,39 +201,57 @@
             });
         }
         
-        // --- Local Database Sync ---
+        // --- NEW: API-Powered Database Sync ---
         async function syncLocalDatabase() {
             const storedDb = localStorage.getItem('pokemon-card-db');
             if (storedDb) {
                 try {
                     localCardDatabase = JSON.parse(storedDb);
-                    if (localCardDatabase && localCardDatabase.length > 0) return;
+                    // A simple check to see if DB is valid
+                    if (localCardDatabase && localCardDatabase.length > 10000) return; 
                 } catch (e) {
                     console.error("Could not parse local DB, refetching...", e);
+                    localStorage.removeItem('pokemon-card-db');
                 }
             }
 
-            const dataUrl = 'https://cdn.jsdelivr.net/gh/PokemonTCG/pokemon-tcg-data@master/cards/en/all.json';
-            try {
-                statusDisplay.textContent = 'SYNCING DATABASE...';
-                const response = await fetch(dataUrl);
-                if (!response.ok) throw new Error(`Network response was not ok. Status: ${response.status}`);
-                
-                const rawData = await response.json();
-                // Filter and map to the format we need to save space
-                localCardDatabase = rawData.map(card => ({
-                    id: card.id,
-                    name: card.name,
-                    images: card.images,
-                    nationalPokedexNumbers: card.nationalPokedexNumbers
-                }));
+            const API_ENDPOINT = 'https://api.pokemontcg.io/v2/cards';
+            const PAGE_SIZE = 250;
+            let allCards = [];
+            let currentPage = 1;
+            let hasMore = true;
 
+            statusDisplay.textContent = 'SYNCING DATABASE...';
+
+            try {
+                while(hasMore) {
+                    const response = await fetch(`${API_ENDPOINT}?page=${currentPage}&pageSize=${PAGE_SIZE}&select=id,name,images,nationalPokedexNumbers`);
+                    if (!response.ok) throw new Error(`API fetch failed on page ${currentPage}. Status: ${response.status}`);
+                    
+                    const data = await response.json();
+                    
+                    allCards.push(...data.data);
+                    
+                    const totalCount = data.totalCount;
+                    statusDisplay.textContent = `SYNCING... ${allCards.length} / ${totalCount} CARDS`;
+
+                    if (allCards.length >= totalCount) {
+                        hasMore = false;
+                    } else {
+                        currentPage++;
+                    }
+                }
+
+                localCardDatabase = allCards;
                 localStorage.setItem('pokemon-card-db', JSON.stringify(localCardDatabase));
                 statusDisplay.textContent = 'DATABASE SYNCED. READY!';
                 setTimeout(() => { statusDisplay.textContent = '' }, 2000);
+
             } catch (error) {
                 console.error('Database sync failed:', error);
                 statusDisplay.textContent = `DB SYNC FAILED: ${error.message}`;
+                // Keep trying after a delay
+                setTimeout(syncLocalDatabase, 5000);
             }
         }
 
@@ -270,8 +288,7 @@
                 results = localCardDatabase.filter(card => card.name.toLowerCase().includes(lowerCaseQuery));
             }
             
-            // REMOVED DE-DUPLICATION to show all variants
-            lastDisplayedCards = results.slice(0, 50); // Show up to 50 variants
+            lastDisplayedCards = results.slice(0, 50);
             displayCards(lastDisplayedCards);
         }
 
