@@ -10,24 +10,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     
     <script type="module">
+        // --- Firebase SDKs ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        // --- Firebase Initialization ---
-        const firebaseConfig = {
-          apiKey: "AIzaSyBqKvL31__K5UZo-iwjO7uN5zPN4t8aDn4",
-          authDomain: "poke-c7d03.firebaseapp.com",
-          projectId: "poke-c7d03",
-          storageBucket: "poke-c7d03.appspot.com",
-          messagingSenderId: "567243781113",
-          appId: "1:567243781113:web:53c5a8e442b4967cdb4328"
-        };
-                
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = firebaseConfig.appId;
 
         // --- DOM References ---
         const searchInput = document.getElementById('searchInput');
@@ -44,24 +29,40 @@
         const panelOverlay = document.getElementById('panel-overlay');
         const myListContainer = document.getElementById('myListContainer');
         const toastContainer = document.getElementById('toast-container');
-        const userIdDisplay = document.getElementById('userIdDisplay');
+        const userDisplay = document.getElementById('userDisplay');
+        const logoutBtn = document.getElementById('logoutBtn');
         const gridViewBtn = document.getElementById('gridViewBtn');
         const listViewBtn = document.getElementById('listViewBtn');
+        const loginModal = document.getElementById('loginModal');
+        const loginForm = document.getElementById('loginForm');
+        const usernameInput = document.getElementById('usernameInput');
 
-        // --- State ---
+        // --- State and Config ---
         const API_BASE_URL = 'https://api.pokemontcg.io/v2/cards';
-        const API_KEY = '5a26cb39-be13-4633-a80b-ce7256a17fe9'; // Your API Key
+        const API_KEY = '5a26cb39-be13-4633-a80b-ce7256a17fe9';
         const TOTAL_POKEMON = 1025;
         let completionList = [];
-        let currentUser = null;
+        let currentUsername = null;
         let unsubscribeFromCollection = null;
-        let searchTimeout; // For debouncing search input
-        let currentView = 'grid'; // 'grid' or 'list'
-        let lastDisplayedCards = []; // To redraw on view change
-        const searchCache = {}; // Cache for search results
-        let isInitialLoad = true; // Flag to handle the first search
+        let searchTimeout;
+        let currentView = 'grid';
+        let lastDisplayedCards = [];
+        const searchCache = {};
 
-        // --- Toast Notifications ---
+        // --- Firebase Initialization ---
+        const firebaseConfig = {
+          apiKey: "AIzaSyBqKvL31__K5UZo-iwjO7uN5zPN4t8aDn4",
+          authDomain: "poke-c7d03.firebaseapp.com",
+          projectId: "poke-c7d03",
+          storageBucket: "poke-c7d03.appspot.com",
+          messagingSenderId: "567243781113",
+          appId: "1:567243781113:web:53c5a8e442b4967cdb4328"
+        };
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const appId = firebaseConfig.appId;
+
+        // --- UI Functions ---
         function showToast(message) {
             const toast = document.createElement('div');
             toast.className = 'toast';
@@ -70,11 +71,10 @@
             toastContainer.appendChild(toast);
         }
 
-        // --- UI Functions ---
         function toggleListPanel(open) {
             if (open) {
-                if (!currentUser) {
-                    showToast("Sign-in needed to manage a list.");
+                if (!currentUsername) {
+                    showToast("Please log in to manage a list.");
                     return;
                 }
                 renderCompletionList();
@@ -107,9 +107,9 @@
 
         // --- Firestore Data Functions ---
         async function saveCollectionToFirestore() {
-            if (!currentUser) return;
+            if (!currentUsername) return;
             try {
-                const userDocRef = doc(db, "artifacts", appId, "users", currentUser.uid, "collection", "data");
+                const userDocRef = doc(db, "artifacts", appId, "users", currentUsername, "collection", "data");
                 await setDoc(userDocRef, { list: completionList });
             } catch (error) {
                 console.error("Error saving collection: ", error);
@@ -117,9 +117,9 @@
             }
         }
 
-        function listenToCollection(userId) {
+        function listenToCollection(username) {
             if (unsubscribeFromCollection) unsubscribeFromCollection();
-            const userDocRef = doc(db, "artifacts", appId, "users", userId, "collection", "data");
+            const userDocRef = doc(db, "artifacts", appId, "users", username, "collection", "data");
             
             unsubscribeFromCollection = onSnapshot(userDocRef, (docSnap) => {
                 completionList = docSnap.exists() ? docSnap.data().list || [] : [];
@@ -127,13 +127,11 @@
                 if (myListPanel.classList.contains('open')) renderCompletionList();
                 
                 const displayedCardButtons = document.querySelectorAll('.card-btn[data-pokedex]');
-                if (displayedCardButtons.length > 0) {
-                    displayedCardButtons.forEach(button => {
-                        const pokedexNumber = parseInt(button.dataset.pokedex, 10);
-                        const isCollected = completionList.some(item => item.pokedex === pokedexNumber);
-                        updateCardButton(pokedexNumber, isCollected);
-                    });
-                }
+                displayedCardButtons.forEach(button => {
+                    const pokedexNumber = parseInt(button.dataset.pokedex, 10);
+                    const isCollected = completionList.some(item => item.pokedex === pokedexNumber);
+                    updateCardButton(pokedexNumber, isCollected);
+                });
             }, (error) => {
                 console.error("Error listening to collection:", error);
                 showToast("Error: Connection lost.");
@@ -142,8 +140,8 @@
 
         // --- Core App Logic ---
         async function addToList(card) {
-            if (!currentUser) {
-                showToast("Please sign in to save cards.");
+            if (!currentUsername) {
+                showToast("Please log in to save cards.");
                 return;
             }
             const pokedexNumber = card.nationalPokedexNumbers?.[0];
@@ -157,12 +155,12 @@
                 };
                 completionList.push(newEntry);
                 await saveCollectionToFirestore();
-                showToast(`Registered ${newEntry.name} to the list!`);
+                showToast(`Registered ${newEntry.name} to your list!`);
             }
         }
 
         async function removeFromList(pokedexNumber) {
-            if (!currentUser) return;
+            if (!currentUsername) return;
             const removedItem = completionList.find(item => item.pokedex === pokedexNumber);
             completionList = completionList.filter(item => item.pokedex !== pokedexNumber);
             await saveCollectionToFirestore();
@@ -277,7 +275,7 @@
 
         function displayCardAsGrid(card) {
             const pokedexNumber = card.nationalPokedexNumbers?.[0];
-            const isCollected = currentUser && pokedexNumber ? completionList.some(item => item.pokedex === pokedexNumber) : false;
+            const isCollected = currentUsername && pokedexNumber ? completionList.some(item => item.pokedex === pokedexNumber) : false;
             
             const cardElement = document.createElement('div');
             cardElement.className = 'text-center';
@@ -296,7 +294,7 @@
                 img.classList.remove('opacity-0');
                 imageContainer.classList.remove('img-placeholder');
             };
-             imageLoader.onerror = () => { imageContainer.innerHTML = `<div class="w-full h-full flex items-center justify-center text-xs text-center p-2">Image not found</div>`;};
+            imageLoader.onerror = () => { imageContainer.innerHTML = `<div class="w-full h-full flex items-center justify-center text-xs text-center p-2">Image not found</div>`;};
 
             const cardInfo = document.createElement('div');
             cardInfo.className = 'mt-2 text-xs';
@@ -321,7 +319,7 @@
         
         function displayCardAsList(card) {
             const pokedexNumber = card.nationalPokedexNumbers?.[0];
-            const isCollected = currentUser && pokedexNumber ? completionList.some(item => item.pokedex === pokedexNumber) : false;
+            const isCollected = currentUsername && pokedexNumber ? completionList.some(item => item.pokedex === pokedexNumber) : false;
 
             const cardElement = document.createElement('div');
             cardElement.className = 'game-box p-3 flex flex-col sm:flex-row items-center gap-4';
@@ -356,29 +354,43 @@
             resultsContainer.appendChild(cardElement);
         }
         
-        // --- Authentication and Initialization (REVISED) ---
-        function handleAuthState(user) {
-             if (user) {
-                currentUser = user;
-                userIdDisplay.textContent = `USER ID: ${user.uid}`;
-                listenToCollection(user.uid);
-            } else {
-                currentUser = null;
-                completionList = [];
-                updateProgress();
-                userIdDisplay.textContent = 'Sign-in required to save progress';
+        // --- NEW Authentication and Session Logic ---
+        function login(username) {
+            const sanitizedUsername = username.trim().toLowerCase();
+            if (!sanitizedUsername) {
+                showToast("Username cannot be empty.");
+                return;
             }
-
-            // This flag ensures the initial search only runs ONCE.
-            if (isInitialLoad) {
-                isInitialLoad = false; // Turn off the flag
-                const initialQuery = searchInput.value || 'Pikachu';
-                searchInput.value = initialQuery;
-                searchCards(initialQuery);
-            }
+            localStorage.setItem('pokemon-tracker-username', sanitizedUsername);
+            currentUsername = sanitizedUsername;
+            
+            loginModal.classList.add('hidden');
+            userDisplay.textContent = `PLAYER: ${currentUsername}`;
+            logoutBtn.classList.remove('hidden');
+            showListBtn.disabled = false;
+            
+            listenToCollection(currentUsername);
+            // Perform initial search after login
+            searchCards('Pikachu');
         }
 
-        // --- Search Logic ---
+        function logout() {
+            if (unsubscribeFromCollection) unsubscribeFromCollection();
+            localStorage.removeItem('pokemon-tracker-username');
+            currentUsername = null;
+            completionList = [];
+            window.location.reload();
+        }
+
+        function checkForUser() {
+            const savedUser = localStorage.getItem('pokemon-tracker-username');
+            if (savedUser) {
+                login(savedUser);
+            } else {
+                loginModal.classList.remove('hidden');
+            }
+        }
+        
         function forceSearch() {
             clearTimeout(searchTimeout);
             const query = searchInput.value.trim();
@@ -389,20 +401,13 @@
         searchInput.addEventListener('input', e => {
             clearTimeout(searchTimeout);
             const query = e.target.value.trim();
-            if (query) {
-                searchTimeout = setTimeout(() => searchCards(query), 500);
-            } else {
-                toggleLoader(false);
-                resultsContainer.innerHTML = '';
-                lastDisplayedCards = [];
-            }
+            searchTimeout = setTimeout(() => searchCards(query), 500);
         });
 
         searchInput.addEventListener('keyup', e => {
-            if (e.key === 'Enter') {
-                forceSearch();
-            }
+            if (e.key === 'Enter') forceSearch();
         });
+        
         searchBtn.addEventListener('click', forceSearch);
         closeModalButton.addEventListener('click', () => imageModal.classList.add('hidden'));
         document.addEventListener('keydown', e => e.key === 'Escape' && !imageModal.classList.contains('hidden') && imageModal.classList.add('hidden'));
@@ -410,18 +415,16 @@
         panelOverlay.addEventListener('click', () => toggleListPanel(false));
         gridViewBtn.addEventListener('click', () => setActiveView('grid'));
         listViewBtn.addEventListener('click', () => setActiveView('list'));
+        logoutBtn.addEventListener('click', logout);
+        loginForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            login(usernameInput.value);
+        });
 
-        // --- Initial Load (REVISED) ---
+        // --- Initial Load ---
         function main() {
-            // Set the listener as the single source of truth for auth changes
-            onAuthStateChanged(auth, handleAuthState);
-            
-            // Attempt to sign in. The listener will handle the result.
-            signInAnonymously(auth).catch(error => {
-                console.error("Anonymous sign-in failed. This can happen in private/incognito mode.", error);
-            });
-            
             setActiveView('grid');
+            checkForUser();
         }
 
         main();
@@ -436,10 +439,11 @@
         .game-btn { border: 3px solid #212121; box-shadow: 4px 4px 0px #212121; transition: all 0.1s ease-in-out; text-transform: uppercase; font-size: 14px; background-color: #fff; }
         .game-btn:hover { background-color: #f0f0f0; }
         .game-btn:active, .game-btn-active { box-shadow: 0px 0px 0px #212121; transform: translate(4px, 4px); background-color: #e0e0e0;}
+        .game-btn:disabled { background-color: #bdbdbd; box-shadow: none; transform: none; cursor: not-allowed; opacity: 0.7; }
         .game-btn-primary { background-color: #2979ff; color: white; }
-        .game-btn-primary:hover { background-color: #2962ff; }
+        .game-btn-primary:hover:not(:disabled) { background-color: #2962ff; }
         .game-btn-success { background-color: #00c853; color: white; }
-        .game-btn-success:hover { background-color: #00c853; }
+        .game-btn-success:hover:not(:disabled) { background-color: #00c853; }
         .game-input { background-color: white; border: 3px solid #212121; font-size: 16px; padding: 12px; width: 100%; }
         .game-input:focus { outline: none; border-color: #2979ff; }
         .progress-container { border: 3px solid #212121; background-color: #e0e0e0; padding: 4px; }
@@ -464,6 +468,16 @@
     </style>
 </head>
 <body class="antialiased">
+    <!-- Login Modal -->
+    <div id="loginModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-70 hidden">
+        <form id="loginForm" class="game-box p-8 text-center w-full max-w-sm">
+            <h2 class="text-2xl font-bold mb-4">CHOOSE YOUR PLAYER NAME</h2>
+            <p class="text-xs text-gray-500 mb-6">This name will be saved on this browser to track your collection.</p>
+            <input type="text" id="usernameInput" class="game-input text-center mb-6" placeholder="e.g., Trainer Ash" required>
+            <button type="submit" class="w-full game-btn game-btn-primary py-3">> START</button>
+        </form>
+    </div>
+
     <div class="max-w-7xl mx-auto p-4 md:p-8 relative z-10">
         <header class="text-center mb-10 p-4"><h1 class="text-3xl md:text-4xl font-black mb-2 tracking-tighter">POKéMON TCG TRACKER</h1></header>
 
@@ -503,7 +517,12 @@
              <div id="loader" class="hidden text-center py-10"><div class="loader"></div></div>
         </div>
 
-        <footer class="text-center mt-4"><p id="userIdDisplay" class="text-gray-500 text-xs"></p></footer>
+        <footer class="text-center mt-4">
+            <div class="flex items-center justify-center gap-4">
+                 <p id="userDisplay" class="text-gray-500 text-xs"></p>
+                 <button id="logoutBtn" class="hidden game-btn text-xs py-1 px-2 border-2 shadow-sm active:translate-y-0.5 active:shadow-none">> LOGOUT</button>
+            </div>
+        </footer>
     </div>
     
     <div id="imageModal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-black bg-opacity-70">
