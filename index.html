@@ -49,13 +49,14 @@
         const rangeFilters = document.getElementById('range-filters');
 
         // --- State and Config ---
-        const TOTAL_POKEMON_SPECIES = 1025; 
+        const TOTAL_POKEMON_SPECIES = 1025; // This might need adjustment based on the new data source if it tracks unique Pokémon.
         let completionList = [];
         let currentUser = null;
         let unsubscribeFromCollection = null;
         let currentView = 'grid';
         let lastDisplayedCards = [];
-        let localCardDatabase = [];
+        let localCardDatabase = {}; // Changed to an object to store cards by ID
+        let allSets = []; // To store data from sets/en.json
         let isRegistering = false;
         let currentSort = { field: 'pokedex', direction: 'asc' };
         let currentFilter = { type: 'all', value: null };
@@ -99,6 +100,10 @@
         }
         
         function updateProgress() {
+            // This calculation will need refinement as TOTAL_POKEMON_SPECIES is a fixed value
+            // and the actual number of *unique* Pokémon across all cards can vary and isn't readily available
+            // from the new data structure directly without processing all cards.
+            // For now, it counts unique Pokedex numbers in your collected list.
             const collectedPokedexNumbers = new Set(completionList.map(item => item.pokedex));
             const collectedCount = collectedPokedexNumbers.size;
             const percentage = (collectedCount / TOTAL_POKEMON_SPECIES) * 100;
@@ -118,7 +123,7 @@
             statusDisplay.classList.toggle('text-red-500', isError);
              if (!message && !isError) {
                  setTimeout(() => { 
-                    if(statusDisplay.textContent === message) statusDisplay.textContent = ''
+                     if(statusDisplay.textContent === message) statusDisplay.textContent = ''
                  }, 3000);
             }
         }
@@ -149,19 +154,26 @@
         // --- Core App Logic ---
         async function addToList(card) {
             if (!currentUser) return;
-            const pokedexNumber = card.nationalPokedexNumbers?.[0];
-            if (!pokedexNumber) return;
+            // The pokedex number is usually in nationalPokedexNumbers array, take the first one or default
+            const pokedexNumber = card.nationalPokedexNumbers?.[0]; 
+            if (!pokedexNumber) {
+                showToast(`Cannot add ${card.name}: No Pokedex number found.`, true);
+                return;
+            }
 
             if (!completionList.some(item => item.id === card.id)) {
                 const newEntry = {
                     id: card.id,
                     pokedex: pokedexNumber,
                     name: card.name,
-                    image: `https://images.pokemontcg.io/${card.set.id}/${card.number}.png`
+                    // Use the correct image path from the new structure
+                    image: `https://images.pokemontcg.io/${card.set.id}/${card.number}.png` 
                 };
                 completionList.push(newEntry);
                 await saveCollectionToFirestore();
                 showToast(`Added ${card.name} to your list!`);
+            } else {
+                showToast(`${card.name} is already in your list!`);
             }
         }
 
@@ -284,68 +296,165 @@
             });
         }
         
-        // --- Database Sync ---
+        // --- Database Sync (Modified for new structure) ---
         async function syncLocalDatabase() {
-            const storedDb = localStorage.getItem('pokemon-card-db');
-            if (storedDb) {
-                try {
-                    localCardDatabase = JSON.parse(storedDb);
-                    if (localCardDatabase && localCardDatabase.length > 5000) {
-                         showStatus('DATABASE LOADED FROM CACHE');
-                         return;
-                    }
-                } catch (e) {
-                    localStorage.removeItem('pokemon-card-db');
+            showStatus('LOADING SETS DATA...');
+            const setsUrl = `https://raw.githubusercontent.com/codesbyabdi/poke/main/sets/en.json`; // Your repo path
+            try {
+                const response = await fetch(setsUrl);
+                if (!response.ok) throw new Error(`Failed to load sets data. Status: ${response.status}`);
+                allSets = await response.json();
+                showStatus(`LOADED ${allSets.length} SETS. READY!`);
+            } catch (error) {
+                showStatus(`FAILED TO LOAD SETS: ${error.message}`, true);
+            }
+        }
+
+        // New helper function to load cards for a specific set
+        async function loadSetData(setId) {
+            // Check if cards for this set are already loaded
+            if (Object.values(localCardDatabase).some(card => card.set.id === setId)) {
+                return true; // Already loaded
+            }
+
+            const cardsUrl = `https://raw.githubusercontent.com/codesbyabdi/poke/main/cards/en/${setId}.json`; // Your repo path
+            try {
+                showStatus(`LOADING CARDS FOR SET: ${setId}...`);
+                const response = await fetch(cardsUrl);
+                if (!response.ok) {
+                    console.warn(`Could not load cards for set ${setId}. Status: ${response.status}`);
+                    return false; // Set might not have a dedicated JSON or is empty
+                }
+                const setData = await response.json();
+                if (setData && setData.cards) {
+                    setData.cards.forEach(card => {
+                        // Add set information to the card if not present, useful for image paths
+                        if (!card.set) {
+                            card.set = { id: setId }; 
+                        }
+                        localCardDatabase[card.id] = card;
+                    });
+                    showStatus(`LOADED ${setData.cards.length} cards from set ${setId}.`);
+                    return true;
+                }
+            } catch (error) {
+                console.error(`Error loading cards for set ${setId}: `, error);
+                return false;
+            }
+            return false;
+        }
+
+        // --- Local Search (Modified for new structure) ---
+        async function getAutocompleteSuggestions(query) {
+            if (!query || allSets.length === 0) return displayAutocomplete([]);
+
+            const lowerCaseQuery = query.toLowerCase();
+            const suggestions = [];
+
+            // Iterate through all sets and check if any cards within them start with the query
+            // This is an approximation. A more robust solution might involve pre-indexing names or a faster search.
+            // For now, it will suggest names from currently loaded cards and available sets.
+            const uniqueNames = new Set();
+            for (const cardId in localCardDatabase) {
+                if (localCardDatabase[cardId].name.toLowerCase().startsWith(lowerCaseQuery)) {
+                    uniqueNames.add(localCardDatabase[cardId].name);
                 }
             }
-            const dataUrl = 'https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/pokemon-tcg-db.json';
-            try {
-                showStatus('SYNCING DATABASE...');
-                const response = await fetch(dataUrl);
-                if (!response.ok) throw new Error(`Network response not ok. Status: ${response.status}`);
-                localCardDatabase = await response.json();
-                localStorage.setItem('pokemon-card-db', JSON.stringify(localCardDatabase));
-                showStatus('DATABASE SYNCED. READY!');
-            } catch (error) {
-                showStatus(`DB SYNC FAILED: ${error.message}`, true);
-                if (storedDb) localCardDatabase = JSON.parse(storedDb);
-            }
+            
+            // Limit suggestions to avoid overwhelming the UI
+            displayAutocomplete(Array.from(uniqueNames).slice(0, 5));
         }
 
-        // --- Local Search ---
-        function getAutocompleteSuggestions(query) {
-            if (!query || localCardDatabase.length === 0) return displayAutocomplete([]);
-            const lowerCaseQuery = query.toLowerCase();
-            const suggestions = localCardDatabase
-                .filter(card => card.name.toLowerCase().startsWith(lowerCaseQuery))
-                .map(card => card.name);
-            displayAutocomplete([...new Set(suggestions)].slice(0, 5));
-        }
-
-        function searchLocalDatabase(query) {
-            if (!query || localCardDatabase.length === 0) {
-                resultsContainer.innerHTML = '';
-                lastDisplayedCards = [];
+        async function searchLocalDatabase(query) {
+            resultsContainer.innerHTML = '';
+            lastDisplayedCards = [];
+            showStatus('SEARCHING...');
+            
+            if (!query) {
+                showStatus('');
                 return;
             }
             
             const isPokedexNumber = /^\d+$/.test(query);
             const lowerCaseQuery = query.toLowerCase();
+            let matchedCards = [];
 
-            let results;
+            // If searching by Pokedex number, try to find in already loaded cards
             if (isPokedexNumber) {
                 const pokedexNumber = parseInt(query, 10);
-                results = localCardDatabase.filter(card => card.nationalPokedexNumbers?.includes(pokedexNumber));
-            } else {
-                results = localCardDatabase.filter(card => card.name.toLowerCase().includes(lowerCaseQuery));
+                for (const cardId in localCardDatabase) {
+                    if (localCardDatabase[cardId].nationalPokedexNumbers?.includes(pokedexNumber)) {
+                        matchedCards.push(localCardDatabase[cardId]);
+                    }
+                }
             }
             
-            lastDisplayedCards = results;
+            // If no results found yet, or searching by name, then we need to load relevant sets
+            if (matchedCards.length === 0 || !isPokedexNumber) {
+                const potentialSetIds = new Set();
+                
+                // Identify potential sets based on card names (approximate)
+                // This is a heuristic. A better approach for full search would involve a pre-indexed list of all card names/pokedex numbers.
+                // For this implementation, we'll try to load all sets that might contain the search query.
+                // This can still be slow if there are many sets and the query is broad.
+                // For production, consider a server-side search or pre-building a comprehensive index.
+                for (const set of allSets) {
+                    // We load the entire set if its name matches, or if any card *might* match (very broad)
+                    // For actual card name search, we'll need to load cards from sets one by one.
+                    // This is a simplification to get it working, but could be inefficient for large databases.
+                    // For a more efficient approach, you'd ideally have an index of card names per set.
+                    if (set.name.toLowerCase().includes(lowerCaseQuery)) {
+                        potentialSetIds.add(set.id);
+                    }
+                }
+
+                // If searching by Pokedex number, we don't necessarily know which set it's in directly from 'sets/en.json'.
+                // So, we'll need to iterate through ALL sets for Pokedex number search if not found in already loaded cards.
+                // This could be very slow.
+                if (isPokedexNumber && matchedCards.length === 0) {
+                    allSets.forEach(set => potentialSetIds.add(set.id));
+                }
+
+                // Load cards for identified sets
+                for (const setId of Array.from(potentialSetIds)) {
+                    await loadSetData(setId);
+                }
+
+                // Now, search again in the potentially expanded localCardDatabase
+                if (isPokedexNumber) {
+                    const pokedexNumber = parseInt(query, 10);
+                    for (const cardId in localCardDatabase) {
+                        if (localCardDatabase[cardId].nationalPokedexNumbers?.includes(pokedexNumber)) {
+                            matchedCards.push(localCardDatabase[cardId]);
+                        }
+                    }
+                } else {
+                    for (const cardId in localCardDatabase) {
+                        if (localCardDatabase[cardId].name.toLowerCase().includes(lowerCaseQuery)) {
+                            matchedCards.push(localCardDatabase[cardId]);
+                        }
+                    }
+                }
+            }
+
+            // Remove duplicates (can happen if multiple sets contain the same card reprint)
+            const uniqueCardsMap = new Map();
+            matchedCards.forEach(card => {
+                // Use a combination of name and pokedex number as a simple unique key for display purposes
+                // If you want strictly unique card IDs, this would be `card.id`
+                const uniqueKey = `${card.name}-${card.nationalPokedexNumbers?.[0] || 'N/A'}`;
+                if (!uniqueCardsMap.has(uniqueKey)) {
+                    uniqueCardsMap.set(uniqueKey, card);
+                }
+            });
+
+            lastDisplayedCards = Array.from(uniqueCardsMap.values());
             displayCards(lastDisplayedCards);
 
             if(lastDisplayedCards.length === 0) showStatus(`No cards found for "${query}".`, true);
             else showStatus(`${lastDisplayedCards.length} cards found.`);
         }
+
 
         // --- Display Functions ---
         function displayAutocomplete(names) {
@@ -383,6 +492,7 @@
             const isCollected = currentUser && completionList.some(item => item.id === card.id);
             const img = cardElement.querySelector('.card-image');
             const imageContainer = cardElement.querySelector('.img-placeholder');
+            // Construct the image URL based on the new structure
             const smallImageUrl = `https://images.pokemontcg.io/${card.set.id}/${card.number}.png`;
             const largeImageUrl = `https://images.pokemontcg.io/${card.set.id}/${card.number}_hires.png`;
 
@@ -455,11 +565,11 @@
                 userDisplay.textContent = `PLAYER: ${user.email}`;
                 logoutBtn.classList.remove('hidden');
                 showListBtn.disabled = false;
-                await syncLocalDatabase();
+                await syncLocalDatabase(); // Load sets data on login
                 searchInput.disabled = false;
                 searchInput.placeholder = "Search Name or Pokédex Nr.";
                 listenToCollection(user.uid);
-                searchLocalDatabase('Pikachu');
+                searchLocalDatabase('Pikachu'); // Initial search to show some cards
             } else {
                 currentUser = null;
                 completionList = [];
@@ -473,6 +583,8 @@
                 searchInput.placeholder = "Please log in...";
                 resultsContainer.innerHTML = '';
                 lastDisplayedCards = [];
+                allSets = []; // Clear sets data on logout
+                localCardDatabase = {}; // Clear cached cards on logout
             }
         }
 
@@ -567,7 +679,6 @@
     </style>
 </head>
 <body class="antialiased">
-    <!-- Login Modal -->
     <div id="loginModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-70">
         <form id="loginForm" class="game-box p-8 text-center w-full max-w-sm">
             <h2 id="loginTitle" class="text-2xl font-bold mb-4">PLAYER LOGIN</h2>
@@ -618,8 +729,8 @@
 
         <footer class="text-center mt-4">
             <div class="flex items-center justify-center gap-4">
-                 <p id="userDisplay" class="text-gray-500 text-xs"></p>
-                 <button id="logoutBtn" class="hidden game-btn text-xs py-1 px-2 border-2 shadow-sm active:translate-y-0.5 active:shadow-none">> LOGOUT</button>
+                   <p id="userDisplay" class="text-gray-500 text-xs"></p>
+                   <button id="logoutBtn" class="hidden game-btn text-xs py-1 px-2 border-2 shadow-sm active:translate-y-0.5 active:shadow-none">> LOGOUT</button>
             </div>
         </footer>
     </div>
@@ -652,11 +763,9 @@
             </div>
              <div id="filterControls" class="text-xs mb-4">
                 <div id="letter-filters" class="flex flex-wrap gap-1 justify-center mb-2">
-                    <!-- Letter filters will be dynamically generated here -->
-                </div>
+                    </div>
                 <div id="range-filters" class="flex flex-wrap gap-1 justify-center">
-                    <!-- Range filters will be dynamically generated here -->
-                </div>
+                    </div>
             </div>
         </div>
         <div id="myListContainer" class="flex-grow overflow-y-auto pr-2 space-y-4"></div>
