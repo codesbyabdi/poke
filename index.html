@@ -36,24 +36,20 @@
         const passwordInput = document.getElementById('passwordInput');
         const loginError = document.getElementById('loginError');
         const loginTitle = document.getElementById('loginTitle');
-        const loginSubmitBtn = document.getElementById('loginSubmitBtn');
+        const loginSubmitBtn = document.getElementById('loginSubmitBtn'); // FIXED: Typo here
         const toggleAuthMode = document.getElementById('toggleAuthMode');
         const autocompleteResults = document.getElementById('autocomplete-results');
         const statusDisplay = document.getElementById('statusDisplay');
         
-        // My List Page DOM Elements
-        const searchView = document.getElementById('searchView');
-        const myListFullPage = document.getElementById('myListFullPage');
-        const myListFullPageContainer = document.getElementById('myListFullPageContainer');
-        const backToSearchBtn = document.getElementById('backToSearchBtn');
-        const myListSortControls = document.getElementById('myListSortControls');
-        const myListFilterControls = document.getElementById('myListFilterControls');
+        // My List Page DOM Elements (NEW)
+        const searchView = document.getElementById('searchView'); // Main search page container
+        const myListFullPage = document.getElementById('myListFullPage'); // My List new page container
+        const myListFullPageContainer = document.getElementById('myListFullPageContainer'); // The actual list of cards on the new page
+        const backToSearchBtn = document.getElementById('backToSearchBtn'); // Back button on list page
+        const myListSortControls = document.getElementById('myListSortControls'); // Sort controls for list page
+        const myListFilterControls = document.getElementById('myListFilterControls'); // Filter controls for list page
         const myListLetterFilters = document.getElementById('myListLetterFilters');
         const myListRangeFilters = document.getElementById('myListRangeFilters');
-        const myListGridViewBtn = document.getElementById('myListGridViewBtn');
-        const myListListViewBtn = document.getElementById('myListListViewBtn');
-        const sortGlobalAscBtn = document.getElementById('sortGlobalAscBtn'); // NEW
-        const sortGlobalDescBtn = document.getElementById('sortGlobalDescBtn'); // NEW
 
 
         // --- State and Config ---
@@ -61,14 +57,13 @@
         let completionList = [];
         let currentUser = null;
         let unsubscribeFromCollection = null;
-        let currentView = 'grid'; // For search results
-        let myListView = 'grid'; // For My List page
+        let currentView = 'grid';
         let lastDisplayedCards = [];
         let localCardDatabase = {}; 
         let isRegistering = false;
-        let currentSort = { field: 'pokedex', direction: 'asc' }; // For My List page sorting
-        let currentFilter = { type: 'all', value: null }; // For My List page filtering
-        let currentPage = 'search'; 
+        let currentSort = { field: 'pokedex', direction: 'asc' };
+        let currentFilter = { type: 'all', value: null };
+        let currentPage = 'search'; // 'search' or 'myList'
 
         // --- Firebase Initialization ---
         const firebaseConfig = {
@@ -103,13 +98,13 @@
         function getTypeIcon(type, size = 'w-4 h-4') {
             const color = typeColors[type] || '#ccc'; // Default to light gray if type not found
             return `<span class="inline-flex items-center justify-center ${size} rounded-full border border-gray-600 align-middle mr-1 game-box-thin" style="background-color: ${color};">
-                        <span class="type-icon-text leading-none">${type.substring(0,1).toUpperCase()}</span>
-                    </span>`; 
+                        <span class="type-icon-text leading-none">${type.substring(0,1)}</span>
+                    </span>`;
         }
 
         function formatCosts(costs) {
             if (!costs || costs.length === 0) return '';
-            return costs.map(cost => getTypeIcon(cost, 'w-5 h-5')).join(''); 
+            return costs.map(cost => getTypeIcon(cost, 'w-5 h-5')).join(''); // Larger icons for costs
         }
 
         // --- UI Functions ---
@@ -117,8 +112,7 @@
             const toast = document.createElement('div');
             toast.className = 'toast';
             toast.innerHTML = message;
-            toastContainer.innerHTML = ''; 
-            toastContainer.appendChild(toast); 
+            toastContainer.appendChild(toast); // Append, not clear and replace
         }
 
         function navigateTo(page) {
@@ -126,7 +120,7 @@
             if (page === 'myList') {
                 searchView.classList.add('hidden');
                 myListFullPage.classList.remove('hidden');
-                renderCompletionList(); 
+                renderCompletionList();
             } else { // 'search'
                 searchView.classList.remove('hidden');
                 myListFullPage.classList.add('hidden');
@@ -143,17 +137,10 @@
         }
 
         function setActiveView(view) {
-            currentView = view; 
+            currentView = view;
             gridViewBtn.classList.toggle('game-btn-active', view === 'grid');
             listViewBtn.classList.toggle('game-btn-active', view === 'list');
             displayCards(lastDisplayedCards);
-        }
-
-        function setMyListView(view) { 
-            myListView = view;
-            myListGridViewBtn.classList.toggle('game-btn-active', view === 'grid');
-            myListListViewBtn.classList.toggle('game-btn-active', view === 'list');
-            renderCompletionList(); 
         }
         
         function showStatus(message, isError = false) {
@@ -185,12 +172,12 @@
                 completionList = docSnap.exists() ? docSnap.data().list || [] : [];
                 updateProgress();
                 if (currentPage === 'myList') renderCompletionList(); 
-                displayCards(lastDisplayedCards); // Re-render search results to update collected status
+                displayCards(lastDisplayedCards);
             });
         }
 
         // --- Core App Logic ---
-        async function addToList(card) { 
+        async function addToList(card) {
             if (!currentUser) return;
             const pokedexNumber = card.nationalPokedexNumbers?.[0]; 
             if (!pokedexNumber) {
@@ -199,7 +186,17 @@
             }
 
             if (!completionList.some(item => item.id === card.id)) {
-                completionList.push(card); // Store the ENTIRE card object for complete data
+                const newEntry = {
+                    id: card.id,
+                    pokedex: pokedexNumber,
+                    name: card.name,
+                    image: `https://images.pokemontcg.io/${card.set.id}/${card.number}.png`,
+                    set: { id: card.set.id, name: card.set.name, releaseDate: card.set.releaseDate},
+                    hp: card.hp,
+                    types: card.types,
+                    rarity: card.rarity
+                };
+                completionList.push(newEntry);
                 await saveCollectionToFirestore();
                 showToast(`Added ${card.name} to your list!`);
             } else {
@@ -218,7 +215,7 @@
         function updateCardButton(card, isCollected, button) {
             button.disabled = isCollected;
             button.className = 'w-full mt-2 game-btn py-2 px-2 text-xs card-btn';
-            if (currentView === 'list') { 
+            if (currentView === 'list') {
                 button.classList.add('sm:w-auto', 'sm:mt-0');
             }
             if (isCollected) {
@@ -231,26 +228,14 @@
         }
 
         // --- "My List" Sorting and Filtering ---
-        // Function to set the primary sort field or toggle its direction
-        function setMyListSortField(field) { 
-            if (currentSort.field === field) {
-                currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
-            } else {
-                currentSort.field = field;
-                currentSort.direction = 'asc';
-            }
-            renderCompletionList(); 
-        }
-
-        // Function to toggle the global sort direction
-        function toggleMyListSortDirection() {
-            currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
-            renderCompletionList();
+        function setSort(field, direction) {
+            currentSort = { field, direction };
+            renderCompletionList(); // No need to pass container, it's a known global now
         }
         
-        function setMyListFilter(type, value) { 
+        function setFilter(type, value) {
             currentFilter = { type, value };
-            renderCompletionList(); 
+            renderCompletionList(); // No need to pass container, it's a known global now
         }
 
         function renderCompletionList() {
@@ -280,28 +265,12 @@
                 availableRanges.forEach(range => createButton(myListRangeFilters, 'range', range, range, true));
             }
             
-            // Update active state on sort field buttons
-            document.querySelectorAll('#myListSortControls .sort-field-btn').forEach(btn => {
-                btn.classList.remove('game-btn-active');
-                if (btn.dataset.field === currentSort.field) {
-                    btn.classList.add('game-btn-active');
-                }
-            });
-            // Update active state and arrow for global direction buttons
-            if (sortGlobalAscBtn) {
-                sortGlobalAscBtn.classList.toggle('game-btn-active', currentSort.direction === 'asc');
-            }
-            if (sortGlobalDescBtn) {
-                sortGlobalDescBtn.classList.toggle('game-btn-active', currentSort.direction === 'desc');
-            }
-
-
+            document.querySelectorAll('#myListSortControls button, #myListFilterControls button').forEach(btn => btn.classList.remove('game-btn-active'));
+            const activeSortBtn = document.querySelector(`#myListSortControls .sort-btn[data-field='${currentSort.field}'][data-direction='${currentSort.direction}']`);
+            if(activeSortBtn) activeSortBtn.classList.add('game-btn-active');
+            
             const activeFilterBtn = document.querySelector(`#myListFilterControls .filter-btn[data-type='${currentFilter.type}'][data-value='${currentFilter.value}']`);
             if(activeFilterBtn) activeFilterBtn.classList.add('game-btn-active');
-
-            // Apply view active state
-            myListGridViewBtn.classList.toggle('game-btn-active', myListView === 'grid');
-            myListListViewBtn.classList.toggle('game-btn-active', myListView === 'list');
 
             let filteredList = completionList;
             if(currentFilter.type === 'letter'){
@@ -312,31 +281,12 @@
             }
 
             const sortedList = [...filteredList].sort((a, b) => {
-                let valA, valB;
-                switch (currentSort.field) {
-                    case 'pokedex':
-                        valA = a.nationalPokedexNumbers?.[0] || Infinity;
-                        valB = b.nationalPokedexNumbers?.[0] || Infinity;
-                        break;
-                    case 'name':
-                        valA = a.name;
-                        valB = b.name;
-                        break;
-                    // Removed 'hp' sorting as requested
-                    case 'releaseDate': 
-                        valA = new Date(a.set?.releaseDate || '1900/01/01'); 
-                        valB = new Date(b.set?.releaseDate || '1900/01/01');
-                        break;
-                    case 'rarity': 
-                        valA = a.rarity || '';
-                        valB = b.rarity || '';
-                        break;
-                    default:
-                        return 0;
+                if (currentSort.field === 'pokedex') {
+                    return currentSort.direction === 'asc' ? a.pokedex - b.pokedex : b.pokedex - a.pokedex;
                 }
-
-                if (valA < valB) return currentSort.direction === 'asc' ? -1 : 1;
-                if (valA > valB) return currentSort.direction === 'asc' ? 1 : -1;
+                if (currentSort.field === 'name') {
+                    return currentSort.direction === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
+                }
                 return 0;
             });
             
@@ -345,54 +295,34 @@
                 return;
             }
 
-            // Render based on myListView
-            if (myListView === 'grid') {
-                container.className = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6 custom-scrollbar'; 
-                sortedList.forEach(card => container.appendChild(createCardElement(card, displayCardAsGridTemplate(card)))); 
-            } else { // list view
-                container.className = 'space-y-4 custom-scrollbar'; 
-                sortedList.forEach(card => container.appendChild(createCardElement(card, displayCardAsListTemplate(card)))); 
-            }
+            sortedList.forEach(item => {
+                const listItem = document.createElement('div');
+                listItem.className = 'flex items-center justify-between p-2 bg-white border-2 border-black';
+                listItem.innerHTML = `
+                    <div class="flex items-center gap-4">
+                        <img src="${item.image}" alt="${item.name}" class="w-10 h-14 object-cover border-2 border-black">
+                        <div>
+                            <p class="font-bold text-sm">${item.name}</p>
+                            ${item.hp ? `<p class="text-red-600 text-xs">HP ${item.hp}</p>` : ''}
+                            ${item.types && item.types.length > 0 ? `<p class="text-xs">${item.types.map(type => getTypeIcon(type, 'w-3 h-3')).join('')}</p>` : ''}
+                            <p class="pokedex-link text-xs text-gray-500 cursor-pointer hover:underline">#${String(item.pokedex).padStart(3, '0')}</p>
+                            ${item.set?.releaseDate ? `<p class="text-xs text-gray-500">Released: ${item.set.releaseDate}</p>` : ''}
+                        </div>
+                    </div>
+                    <button class="remove-btn text-red-500 hover:text-red-700 text-2xl">[X]</button>`;
+                
+                listItem.querySelector('.remove-btn').onclick = () => removeFromList(item.id);
+                listItem.querySelector('.pokedex-link').onclick = () => {
+                    navigateTo('search'); 
+                    searchInput.value = item.pokedex; 
+                    searchLocalDatabase(String(item.pokedex)); 
+                };
 
-            // After rendering, ensure the delete button works
-            container.querySelectorAll('.remove-btn').forEach(button => {
-                const cardId = button.dataset.cardId;
-                button.onclick = () => removeFromList(cardId);
+                container.appendChild(listItem);
             });
         }
-
-        // Helper function for grid view template (used by both search and my list)
-        function displayCardAsGridTemplate(card) {
-            return `<div class="text-center">
-                <div class="img-placeholder">
-                    <img alt="${card.name}" class="card-image w-full border-4 border-black cursor-pointer opacity-0" loading="lazy">
-                </div>
-                <div class="mt-2 text-xs">
-                    <p class="font-bold truncate">${card.name}</p>
-                    <div class="card-details-info text-gray-700 text-[10px] mt-1 mb-1"></div>
-                </div>
-                <button data-card-id="${card.id}" class="card-btn"></button>
-            </div>`;
-        }
-
-        // Helper function for list view template (used by both search and my list)
-        function displayCardAsListTemplate(card) {
-            return `<div class="game-box p-3 flex flex-col sm:flex-row items-center gap-4">
-                <div class="img-placeholder w-20 h-28 flex-shrink-0">
-                    <img alt="${card.name}" class="card-image w-20 h-28 object-cover border-2 border-black cursor-pointer opacity-0" loading="lazy">
-                </div>
-                <div class="flex-grow text-center sm:text-left">
-                    <p class="font-bold text-base">${card.name}</p>
-                    <div class="card-details-info text-gray-700 text-xs mt-1 mb-1"></div>
-                    <p class="text-xs text-gray-500">#${String(card.nationalPokedexNumbers?.[0] || 'N/A').padStart(3, '0')}</p>
-                    ${card.rarity ? `<p class="text-xs text-gray-500 capitalize">Rarity: ${card.rarity.toLowerCase()}</p>` : ''}
-                </div>
-                <button data-card-id="${card.id}" class="card-btn"></button>
-            </div>`;
-        }
-
-
-        // --- Database Sync ---
+        
+        // --- Database Sync (Modified for single compiled JSON) ---
         async function syncLocalDatabase() {
             const storedDb = localStorage.getItem('pokemon-card-db');
             const dataUrl = 'https://raw.githubusercontent.com/codesbyabdi/poke/main/pokemon-tcg-db.json'; 
@@ -495,9 +425,10 @@
                 const pokedexA = a.nationalPokedexNumbers?.[0] || Infinity;
                 const pokedexB = b.nationalPokedexNumbers?.[0] || Infinity;
 
-                if (pokedexA < pokedexB) return -1;
-                if (pokedexA > pokedexB) return 1;
-                return a.name.localeCompare(b.name); // Secondary sort by name
+                if (pokedexA !== pokedexB) {
+                    return pokedexA - pokedexB;
+                }
+                return a.name.localeCompare(b.name);
             });
 
             lastDisplayedCards = results;
@@ -528,13 +459,12 @@
         function displayCards(cards) {
             resultsContainer.innerHTML = '';
             if (cards.length === 0) return;
-            // Use existing currentView for search results
             if (currentView === 'grid') {
                 resultsContainer.className = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6';
-                cards.forEach(card => resultsContainer.appendChild(createCardElement(card, displayCardAsGridTemplate(card))));
-            } else { // List view
+                cards.forEach(displayCardAsGrid);
+            } else {
                 resultsContainer.className = 'space-y-4';
-                cards.forEach(card => resultsContainer.appendChild(createCardElement(card, displayCardAsListTemplate(card))));
+                cards.forEach(displayCardAsList);
             }
         }
         
@@ -629,19 +559,20 @@
                 detailsHtml += addThemedSection('Flavor Text', `<p class="text-sm italic text-gray-600 leading-tight">"${card.flavorText}"</p>`);
             }
             
-            modalDetailsContainer.innerHTML = detailsHtml; 
-            imageModal.classList.remove('hidden'); 
+            modalDetailsContainer.innerHTML = detailsHtml; // Set the generated HTML
+            imageModal.classList.remove('hidden'); // Show the modal
         }
 
 
-        function createCardElement(card, templateHtml) { 
+        function createCardElement(card, template) {
             const cardElement = document.createElement('div');
-            cardElement.innerHTML = templateHtml; 
+            cardElement.innerHTML = template;
             const isCollected = currentUser && completionList.some(item => item.id === card.id);
             const img = cardElement.querySelector('.card-image');
             const imageContainer = cardElement.querySelector('.img-placeholder');
-            const smallImageUrl = `https://images.pokemontcg.io/${card.set.id}/${card.number}.png`; 
+            const smallImageUrl = `https://images.pokemontcg.io/${card.set.id}/${card.number}.png`;
 
+            // Display additional details on the card itself
             const cardDetailsDiv = cardElement.querySelector('.card-details-info');
             if (cardDetailsDiv) {
                 let detailsHtml = '';
@@ -651,7 +582,7 @@
                 if (card.types && card.types.length > 0) {
                     detailsHtml += card.types.map(type => getTypeIcon(type, 'w-3 h-3')).join('');
                 }
-                if (card.set?.releaseDate) {
+                if (card.set?.releaseDate) { // Added Release Date
                     detailsHtml += `<span class="ml-2 text-gray-500 text-[9px] whitespace-nowrap">(Released: ${card.set.releaseDate})</span>`;
                 }
                 cardDetailsDiv.innerHTML = detailsHtml;
@@ -687,11 +618,33 @@
         }
 
         function displayCardAsGrid(card) {
-            resultsContainer.appendChild(createCardElement(card, displayCardAsGridTemplate(card)));
+            const template = `<div class="text-center">
+                <div class="img-placeholder">
+                    <img alt="${card.name}" class="card-image w-full border-4 border-black cursor-pointer opacity-0" loading="lazy">
+                </div>
+                <div class="mt-2 text-xs">
+                    <p class="font-bold truncate">${card.name}</p>
+                    <div class="card-details-info text-gray-700 text-[10px] mt-1 mb-1"></div>
+                </div>
+                <button data-card-id="${card.id}" class="card-btn"></button>
+            </div>`;
+            resultsContainer.appendChild(createCardElement(card, template));
         }
         
         function displayCardAsList(card) {
-            resultsContainer.appendChild(createCardElement(card, displayCardAsListTemplate(card)));
+            const template = `<div class="game-box p-3 flex flex-col sm:flex-row items-center gap-4">
+                <div class="img-placeholder w-20 h-28 flex-shrink-0">
+                    <img alt="${card.name}" class="card-image w-20 h-28 object-cover border-2 border-black cursor-pointer opacity-0" loading="lazy">
+                </div>
+                <div class="flex-grow text-center sm:text-left">
+                    <p class="font-bold text-base">${card.name}</p>
+                    <div class="card-details-info text-gray-700 text-xs mt-1 mb-1"></div>
+                    <p class="text-xs text-gray-500">#${String(card.nationalPokedexNumbers?.[0] || 'N/A').padStart(3, '0')}</p>
+                    ${card.rarity ? `<p class="text-xs text-gray-500 capitalize">Rarity: ${card.rarity.toLowerCase()}</p>` : ''}
+                </div>
+                <button data-card-id="${card.id}" class="card-btn"></button>
+            </div>`;
+            resultsContainer.appendChild(createCardElement(card, template));
         }
 
         // --- Authentication ---
@@ -770,37 +723,27 @@
 
             gridViewBtn.addEventListener('click', () => setActiveView('grid'));
             listViewBtn.addEventListener('click', () => setActiveView('list'));
-            
-            myListGridViewBtn.addEventListener('click', () => setMyListView('grid')); 
-            myListListViewBtn.addEventListener('click', () => setMyListView('list')); 
-
             logoutBtn.addEventListener('click', () => signOut(auth));
             loginForm.addEventListener('submit', handleAuthForm);
             toggleAuthMode.addEventListener('click', () => setAuthMode(!isRegistering));
             
-            // Event listener for My List sorting controls
             myListSortControls.addEventListener('click', (e) => {
-                const targetFieldBtn = e.target.closest('.sort-field-btn');
-                const targetDirectionBtn = e.target.closest('.sort-direction-btn');
-
-                if (targetFieldBtn) {
-                    setMyListSortField(targetFieldBtn.dataset.field);
-                } else if (targetDirectionBtn) {
-                    toggleMyListSortDirection();
+                const target = e.target.closest('.sort-btn');
+                if(target){
+                    setSort(target.dataset.field, target.dataset.direction);
                 }
             });
             myListFilterControls.addEventListener('click', (e) => {
                 const target = e.target.closest('.filter-btn');
                 if(target){
-                    setMyListFilter(target.dataset.type, target.dataset.value);
+                    setFilter(target.dataset.type, target.dataset.value);
                 }
             });
         }
         
         // --- Initial Load ---
         function main() {
-            setActiveView('grid'); 
-            setMyListView('grid'); 
+            setActiveView('grid');
             onAuthStateChanged(auth, handleAuthState); 
             setupEventListeners();
         }
@@ -857,8 +800,8 @@
             border-radius: 0.5rem; 
             width: 90%; 
             max-width: 90%;
-            max-height: 95vh; 
-            overflow-y: auto; 
+            max-height: 95vh; /* Ensured the content box itself has a max-height */
+            overflow-y: auto; /* Allow scrolling within the content box */
         }
 
         /* Responsive Modal Widths */
@@ -922,22 +865,18 @@
             font-family: sans-serif; 
             font-weight: bold;
         }
-        /* MODAL CLOSE BUTTON STYLES (Fixed to be outside the content box, within the overlay) */
+        /* MODAL CLOSE BUTTON STYLES (New) */
         #closeModal {
-            position: absolute; 
-            top: -15px; /* Adjusted to be outside the main modal content box */
-            right: -15px; /* Adjusted to be outside the main modal content box */
+            position: absolute; /* Ensure it's absolutely positioned within its relative parent */
+            top: 10px; /* Position relative to the top edge of the content box */
+            right: 10px; /* Position relative to the right edge of the content box */
             width: 3rem; 
             height: 3rem;
             font-size: 1.5rem;
             background-color: #D32F2F; 
             border-radius: 0.5rem; 
             box-shadow: 4px 4px 0px #212121; 
-            z-index: 60; 
-            display: flex; 
-            align-items: center;
-            justify-content: center;
-            cursor: pointer; 
+            z-index: 60; /* Ensure it's above other elements in the modal */
         }
         #closeModal:hover {
             background-color: #C62828; 
@@ -1013,24 +952,18 @@
             </header>
 
             <div class="game-box p-4 md:p-6">
-                <!-- My List Sorting Controls -->
-                <div id="myListSortControls" class="grid grid-cols-2 lg:grid-cols-3 gap-2 text-xs border-y-2 border-black py-2 mb-4">
-                    <!-- Sort by Pokedex Number -->
+                <div id="myListSortControls" class="grid grid-cols-2 gap-2 text-xs border-y-2 border-black py-2 mb-4">
                     <div class="flex items-center gap-2">
-                        <span class="font-bold">SORT BY:</span>
-                        <button data-field="pokedex" class="sort-field-btn game-btn p-1 border-2">#</button>
-                        <button data-field="name" class="sort-field-btn game-btn p-1 border-2">NAME</button>
-                        <button data-field="releaseDate" class="sort-field-btn game-btn p-1 border-2">RELEASE</button>
-                        <button data-field="rarity" class="sort-field-btn game-btn p-1 border-2">RARITY</button>
+                        <span class="font-bold">#</span>
+                        <button data-field="pokedex" data-direction="asc" title="Sort by Number Ascending" class="sort-btn game-btn p-1 border-2">▲</button>
+                        <button data-field="pokedex" data-direction="desc" title="Sort by Number Descending" class="sort-btn game-btn p-1 border-2">▼</button>
                     </div>
-                    <!-- Global Sort Direction Buttons -->
-                    <div class="flex items-center gap-2 justify-end col-span-2 lg:col-span-1">
-                        <span class="font-bold">DIRECTION:</span>
-                        <button id="sortGlobalAscBtn" data-direction-toggle="asc" class="game-btn p-1 border-2">&#9650;</button>
-                        <button id="sortGlobalDescBtn" data-direction-toggle="desc" class="game-btn p-1 border-2">&#9660;</button>
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold">NAME</span>
+                        <button data-field="name" data-direction="asc" title="Sort by Name Ascending" class="sort-btn game-btn p-1 border-2">▲</button>
+                        <button data-field="name" data-direction="desc" title="Sort by Name Descending" class="sort-btn game-btn p-1 border-2">▼</button>
                     </div>
                 </div>
-                <!-- My List Filter Controls -->
                 <div id="myListFilterControls" class="text-xs mb-4">
                     <div id="myListLetterFilters" class="flex flex-wrap gap-1 justify-center mb-2">
                         <!-- Letter filters will be dynamically generated here -->
@@ -1038,15 +971,6 @@
                     <div id="myListRangeFilters" class="flex flex-wrap gap-1 justify-center">
                         <!-- Range filters will be dynamically generated here -->
                     </div>
-                </div>
-                <!-- My List View Toggle Buttons -->
-                <div class="flex justify-end gap-2 mb-4">
-                    <button id="myListGridViewBtn" title="Grid View" class="game-btn p-3">
-                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
-                    </button>
-                    <button id="myListListViewBtn" title="List View" class="game-btn p-3">
-                        <svg class="w-5 h-5" fill="currentColor" viewbox="0 0 20 20"><path fill-rule="evenodd" d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10zm0 5.25a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75z" clip-rule="evenodd"></path></svg>
-                    </button>
                 </div>
                 <div id="myListFullPageContainer" class="flex-grow overflow-y-auto pr-2 space-y-4 custom-scrollbar"></div>
             </div>
@@ -1061,7 +985,7 @@
     </div>
     
     <!-- MODAL - Stays fixed and on top -->
-    <div id="imageModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-black bg-opacity-70">
+    <div id="imageModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-70">
         <div class="relative w-11/12 sm:max-w-md md:max-w-3xl lg:max-w-4xl xl:max-w-6xl modal-content-box p-6 flex flex-col md:flex-row gap-4 max-h-[95vh] rounded-lg">
             <!-- Card Image Column -->
             <div class="flex-shrink-0 flex justify-center items-start w-full md:w-1/2">
@@ -1071,7 +995,7 @@
             <!-- Card Details Column -->
             <div id="modalDetailsContainer" class="flex-grow text-sm w-full md:w-1/2 p-2 overflow-y-auto custom-scrollbar">
                 <!-- Details will be dynamically inserted here -->
-                <p>Click on a card to see details...</p> 
+                <p>Loading card details...</p> 
             </div>
 
             <!-- Close Button (Relocated and Restyled) -->
