@@ -70,6 +70,7 @@
         // "Wants List" Page
         const wantsListContainer = document.getElementById('wantsListContainer');
         const backToSearchBtnWants = document.getElementById('backToSearchBtnWants');
+        const searchSortControls = document.getElementById('searchSortControls');
 
         // "Sets" Page
         const setsContainer = document.getElementById('setsContainer');
@@ -884,6 +885,9 @@
         function main() {
             setActiveView('grid', 'search');
             setActiveView('grid', 'myList');
+            // **FIX**: Re-added the sort controls initialization for the search page.
+            createSortControls(searchSortControls, searchSort, () => displayCards(lastDisplayedCards));
+            createSortControls(myListSortControlsContainer, myListSort, renderCompletionList);
             const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
             const savedTheme = localStorage.getItem('darkMode');
             applyDarkMode(savedTheme === 'true' || (savedTheme === null && prefersDark));
