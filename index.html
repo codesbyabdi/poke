@@ -52,13 +52,8 @@
         const myListRangeFilters = document.getElementById('myListRangeFilters');
         const myListGridViewBtn = document.getElementById('myListGridViewBtn');
         const myListListViewBtn = document.getElementById('myListListViewBtn');
-        const sortGlobalAscBtn = document.getElementById('sortGlobalAscBtn');
-        const sortGlobalDescBtn = document.getElementById('sortGlobalDescBtn');
-        const listTotalCards = document.getElementById('listTotalCards'); // NEW STATS
-        const listUniqueSpecies = document.getElementById('listUniqueSpecies'); // NEW STATS
-        const listTotalHP = document.getElementById('listTotalHP'); // NEW STATS
-        const listTotalAttacks = document.getElementById('listTotalAttacks'); // NEW STATS
-        const listTotalAbilities = document.getElementById('listTotalAbilities'); // NEW STATS
+        const sortGlobalAscBtn = document.getElementById('sortGlobalAscBtn'); // NEW
+        const sortGlobalDescBtn = document.getElementById('sortGlobalDescBtn'); // NEW
 
 
         // --- State and Config ---
@@ -147,35 +142,6 @@
             progressBar.style.width = `${percentage}%`;
         }
 
-        function updateMyListStats() { // NEW FUNCTION for My List stats
-            listTotalCards.textContent = completionList.length;
-
-            const uniquePokedexNumbers = new Set();
-            let totalHP = 0;
-            let totalAttacks = 0;
-            let totalAbilities = 0;
-
-            completionList.forEach(card => {
-                if (card.nationalPokedexNumbers && card.nationalPokedexNumbers.length > 0) {
-                    uniquePokedexNumbers.add(card.nationalPokedexNumbers[0]);
-                }
-                if (card.hp) {
-                    totalHP += parseInt(card.hp) || 0;
-                }
-                if (card.attacks) {
-                    totalAttacks += card.attacks.length;
-                }
-                if (card.abilities) {
-                    totalAbilities += card.abilities.length;
-                }
-            });
-
-            listUniqueSpecies.textContent = `${uniquePokedexNumbers.size}/${TOTAL_POKEMON_SPECIES}`; // Display as X/Total
-            listTotalHP.textContent = totalHP;
-            listTotalAttacks.textContent = totalAttacks;
-            listTotalAbilities.textContent = totalAbilities;
-        }
-
         function setActiveView(view) {
             currentView = view; 
             gridViewBtn.classList.toggle('game-btn-active', view === 'grid');
@@ -218,7 +184,6 @@
             unsubscribeFromCollection = onSnapshot(userDocRef, (docSnap) => {
                 completionList = docSnap.exists() ? docSnap.data().list || [] : [];
                 updateProgress();
-                updateMyListStats(); // Update stats on list change
                 if (currentPage === 'myList') renderCompletionList(); 
                 displayCards(lastDisplayedCards); // Re-render search results to update collected status
             });
@@ -234,7 +199,7 @@
             }
 
             if (!completionList.some(item => item.id === card.id)) {
-                completionList.push(card); 
+                completionList.push(card); // Store the ENTIRE card object for complete data
                 await saveCollectionToFirestore();
                 showToast(`Added ${card.name} to your list!`);
             } else {
@@ -266,6 +231,7 @@
         }
 
         // --- "My List" Sorting and Filtering ---
+        // Function to set the primary sort field or toggle its direction
         function setMyListSortField(field) { 
             if (currentSort.field === field) {
                 currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
@@ -276,6 +242,7 @@
             renderCompletionList(); 
         }
 
+        // Function to toggle the global sort direction
         function toggleMyListSortDirection() {
             currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
             renderCompletionList();
@@ -290,7 +257,7 @@
             const container = myListFullPageContainer;
             container.innerHTML = '';
             
-            const createFilterButton = (parent, type, value, text, isTextSmall = false) => {
+            const createButton = (parent, type, value, text, isTextSmall = false) => {
                 const button = document.createElement('button');
                 button.dataset.type = type;
                 button.dataset.value = value;
@@ -302,15 +269,15 @@
             myListLetterFilters.innerHTML = ''; 
             myListRangeFilters.innerHTML = '';
 
-            createFilterButton(myListLetterFilters, 'all', 'all', 'ALL');
+            createButton(myListLetterFilters, 'all', 'all', 'ALL');
 
             if (completionList.length > 0) {
                 const availableLetters = [...new Set(completionList.map(c => c.name[0].toUpperCase()))].sort();
-                availableLetters.forEach(letter => createFilterButton(myListLetterFilters, 'letter', letter, letter));
+                availableLetters.forEach(letter => createButton(myListLetterFilters, 'letter', letter, letter));
 
                 const getRange = num => `${Math.floor(num / 50) * 50 + 1}-${Math.floor(num / 50) * 50 + 50}`;
                 const availableRanges = [...new Set(completionList.map(c => getRange(c.pokedex)))].sort((a,b) => parseInt(a) - parseInt(b));
-                availableRanges.forEach(range => createFilterButton(myListRangeFilters, 'range', range, range, true));
+                availableRanges.forEach(range => createButton(myListRangeFilters, 'range', range, range, true));
             }
             
             // Update active state on sort field buttons
@@ -368,14 +335,9 @@
                         return 0;
                 }
 
-                if (currentSort.direction === 'asc') {
-                    if (valA < valB) return -1;
-                    if (valA > valB) return 1;
-                } else { // descending
-                    if (valA < valB) return 1;
-                    if (valA > valB) return -1;
-                }
-                return 0; // if values are equal
+                if (valA < valB) return currentSort.direction === 'asc' ? -1 : 1;
+                if (valA > valB) return currentSort.direction === 'asc' ? 1 : -1;
+                return 0;
             });
             
             if (sortedList.length === 0) {
@@ -386,107 +348,20 @@
             // Render based on myListView
             if (myListView === 'grid') {
                 container.className = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6 custom-scrollbar'; 
-                sortedList.forEach(card => container.appendChild(createMyListGridCardElement(card))); 
+                sortedList.forEach(card => container.appendChild(createCardElement(card, displayCardAsGridTemplate(card)))); 
             } else { // list view
                 container.className = 'space-y-4 custom-scrollbar'; 
-                sortedList.forEach(card => container.appendChild(createMyListListCardElement(card))); 
+                sortedList.forEach(card => container.appendChild(createCardElement(card, displayCardAsListTemplate(card)))); 
             }
+
+            // After rendering, ensure the delete button works
+            container.querySelectorAll('.remove-btn').forEach(button => {
+                const cardId = button.dataset.cardId;
+                button.onclick = () => removeFromList(cardId);
+            });
         }
 
-        // --- Functions to create card elements specifically for My List ---
-        function createMyListGridCardElement(card) {
-            const cardElement = document.createElement('div');
-            cardElement.className = 'text-center'; 
-            cardElement.innerHTML = `
-                <div class="img-placeholder">
-                    <img src="https://images.pokemontcg.io/${card.set.id}/${card.number}.png" 
-                         alt="${card.name}" 
-                         class="card-image w-full border-4 border-black cursor-pointer opacity-0" 
-                         loading="lazy"
-                         onerror="this.onerror=null; this.src='https://placehold.co/245x342/d1d5db/4a5568?text=Image+Missing';">
-                </div>
-                <div class="mt-2 text-xs">
-                    <p class="font-bold truncate">${card.name}</p>
-                    <p class="text-red-600 font-bold">HP ${card.hp || 'N/A'}</p>
-                    <p class="text-gray-700 text-[10px] mt-1 mb-1">${card.types ? card.types.map(type => getTypeIcon(type, 'w-3 h-3')).join('') : ''}</p>
-                    <p class="text-xs text-gray-500">#${String(card.nationalPokedexNumbers?.[0] || 'N/A').padStart(3, '0')}</p>
-                    ${card.set?.releaseDate ? `<p class="text-xs text-gray-500 whitespace-nowrap">Released: ${card.set.releaseDate}</p>` : ''}
-                    ${card.rarity ? `<p class="text-xs text-gray-500 capitalize">Rarity: ${card.rarity.toLowerCase()}</p>` : ''}
-                </div>
-                <button data-card-id="${card.id}" class="remove-btn w-full mt-2 game-btn py-2 px-2 text-xs text-red-500 hover:text-white hover:bg-red-500">[X] REMOVE</button>
-            `;
-            
-            const img = cardElement.querySelector('.card-image');
-            const imageContainer = cardElement.querySelector('.img-placeholder');
-            if (img && imageContainer) {
-                const imageLoader = new Image();
-                imageLoader.src = img.src; // Use the img.src which already points to the TCG image URL
-                imageLoader.onload = () => {
-                    img.classList.remove('opacity-0');
-                    imageContainer.classList.remove('img-placeholder');
-                };
-                imageLoader.onerror = () => {
-                    // Fallback for missing image
-                    img.src = 'https://placehold.co/245x342/d1d5db/4a5568?text=Image+Missing'; 
-                    img.classList.remove('opacity-0');
-                    imageContainer.classList.remove('img-placeholder');
-                    console.warn(`Image missing for card: ${card.name} (${card.id})`);
-                };
-                img.addEventListener('click', () => showCardDetailsModal(card));
-            }
-            // Attach remove handler
-            cardElement.querySelector('.remove-btn').onclick = () => removeFromList(card.id);
-
-            return cardElement;
-        }
-
-        function createMyListListCardElement(card) {
-            const cardElement = document.createElement('div');
-            cardElement.className = 'game-box p-3 flex flex-col sm:flex-row items-center gap-4'; 
-            cardElement.innerHTML = `
-                <div class="img-placeholder w-20 h-28 flex-shrink-0">
-                    <img src="https://images.pokemontcg.io/${card.set.id}/${card.number}.png" 
-                         alt="${card.name}" 
-                         class="card-image w-20 h-28 object-cover border-2 border-black cursor-pointer opacity-0" 
-                         loading="lazy"
-                         onerror="this.onerror=null; this.src='https://placehold.co/80x112/d1d5db/4a5568?text=Image+Missing';">
-                </div>
-                <div class="flex-grow text-center sm:text-left">
-                    <p class="font-bold text-base">${card.name}</p>
-                    <p class="text-red-600 font-bold text-xs">HP ${card.hp || 'N/A'}</p>
-                    <p class="text-gray-700 text-xs mt-1 mb-1">${card.types ? card.types.map(type => getTypeIcon(type, 'w-3 h-3')).join('') : ''}</p>
-                    <p class="text-xs text-gray-500">#${String(card.nationalPokedexNumbers?.[0] || 'N/A').padStart(3, '0')}</p>
-                    ${card.set?.releaseDate ? `<p class="text-xs text-gray-500 whitespace-nowrap">Released: ${card.set.releaseDate}</p>` : ''}
-                    ${card.rarity ? `<p class="text-xs text-gray-500 capitalize">Rarity: ${card.rarity.toLowerCase()}</p>` : ''}
-                </div>
-                <button data-card-id="${card.id}" class="remove-btn text-red-500 hover:text-red-700 text-2xl">[X]</button>
-            `;
-
-            const img = cardElement.querySelector('.card-image');
-            const imageContainer = cardElement.querySelector('.img-placeholder');
-            if (img && imageContainer) {
-                const imageLoader = new Image();
-                imageLoader.src = img.src; // Use the img.src which already points to the TCG image URL
-                imageLoader.onload = () => {
-                    img.classList.remove('opacity-0');
-                    imageContainer.classList.remove('img-placeholder');
-                };
-                imageLoader.onerror = () => {
-                    // Fallback for missing image
-                    img.src = 'https://placehold.co/80x112/d1d5db/4a5568?text=Image+Missing'; 
-                    img.classList.remove('opacity-0');
-                    imageContainer.classList.remove('img-placeholder');
-                    console.warn(`Image missing for card: ${card.name} (${card.id})`);
-                };
-                img.addEventListener('click', () => showCardDetailsModal(card));
-            }
-            // Attach remove handler
-            cardElement.querySelector('.remove-btn').onclick = () => removeFromList(card.id);
-            
-            return cardElement;
-        }
-
-        // Helper function for search results (unchanged template logic, used by displayCards)
+        // Helper function for grid view template (used by both search and my list)
         function displayCardAsGridTemplate(card) {
             return `<div class="text-center">
                 <div class="img-placeholder">
@@ -500,7 +375,7 @@
             </div>`;
         }
 
-        // Helper function for list view template (unchanged template logic, used by displayCards)
+        // Helper function for list view template (used by both search and my list)
         function displayCardAsListTemplate(card) {
             return `<div class="game-box p-3 flex flex-col sm:flex-row items-center gap-4">
                 <div class="img-placeholder w-20 h-28 flex-shrink-0">
@@ -519,7 +394,6 @@
 
         // --- Database Sync ---
         async function syncLocalDatabase() {
-            console.log("syncLocalDatabase: Starting sync.");
             const storedDb = localStorage.getItem('pokemon-card-db');
             const dataUrl = 'https://raw.githubusercontent.com/codesbyabdi/poke/main/pokemon-tcg-db.json'; 
 
@@ -531,21 +405,18 @@
                         parsedStoredDb.forEach(card => tempDb[card.id] = card);
                         localCardDatabase = tempDb;
                         showStatus('DATABASE LOADED FROM CACHE');
-                        console.log("syncLocalDatabase: Loaded from cache.");
                         return;
                     } else {
-                         console.warn("syncLocalDatabase: Cached DB found but invalid or too small, clearing.");
                          localStorage.removeItem('pokemon-card-db');
                     }
                 } catch (e) {
-                    console.error("syncLocalDatabase: Error parsing cached DB, clearing:", e);
+                    console.error("Error parsing cached DB, clearing:", e);
                     localStorage.removeItem('pokemon-card-db');
                 }
             }
             
             try {
                 showStatus('SYNCING DATABASE (first load might take a moment)...');
-                console.log("syncLocalDatabase: Fetching remote data.");
                 const response = await fetch(dataUrl);
                 if (!response.ok) {
                     throw new Error(`Network response not ok. Status: ${response.status} - ${response.statusText}`);
@@ -558,9 +429,7 @@
 
                 localStorage.setItem('pokemon-card-db', JSON.stringify(dataArray)); 
                 showStatus('DATABASE SYNCED. READY!');
-                console.log("syncLocalDatabase: Remote data synced and cached.");
             } catch (error) {
-                console.error("syncLocalDatabase: DB SYNC FAILED:", error);
                 showStatus(`DB SYNC FAILED: ${error.message}`, true);
                 if (storedDb) {
                     try {
@@ -569,9 +438,8 @@
                         dataArray.forEach(card => tempDb[card.id] = card);
                         localCardDatabase = tempDb;
                         showStatus('Loaded from cache due to sync failure.', false);
-                        console.log("syncLocalDatabase: Loaded from fallback cache.");
                     } catch (e) {
-                        console.error("syncLocalDatabase: Error parsing fallback cached DB:", e);
+                        console.error("Error parsing fallback cached DB:", e);
                         showStatus('No local cache found or it is corrupted.', true);
                     }
                 }
@@ -629,7 +497,7 @@
 
                 if (pokedexA < pokedexB) return -1;
                 if (pokedexA > pokedexB) return 1;
-                return a.name.localeCompare(b.name); 
+                return a.name.localeCompare(b.name); // Secondary sort by name
             });
 
             lastDisplayedCards = results;
@@ -642,7 +510,7 @@
         // --- Display Functions ---
         function displayAutocomplete(names) {
             autocompleteResults.innerHTML = '';
-            if (names.length === 0) return displayAutocomplete([]);
+            if (names.length === 0) return autocompleteResults.classList.add('hidden');
             names.forEach(name => {
                 const item = document.createElement('div');
                 item.className = 'suggestion-item';
@@ -660,10 +528,11 @@
         function displayCards(cards) {
             resultsContainer.innerHTML = '';
             if (cards.length === 0) return;
+            // Use existing currentView for search results
             if (currentView === 'grid') {
                 resultsContainer.className = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6';
                 cards.forEach(card => resultsContainer.appendChild(createCardElement(card, displayCardAsGridTemplate(card))));
-            } else { 
+            } else { // List view
                 resultsContainer.className = 'space-y-4';
                 cards.forEach(card => resultsContainer.appendChild(createCardElement(card, displayCardAsListTemplate(card))));
             }
@@ -673,8 +542,9 @@
         function showCardDetailsModal(card) {
             const largeImageUrl = `https://images.pokemontcg.io/${card.set.id}/${card.number}_hires.png`;
             modalImage.src = largeImageUrl;
-            modalDetailsContainer.innerHTML = ''; 
+            modalDetailsContainer.innerHTML = ''; // Clear previous details
 
+            // Helper for detail rows
             const addDetailRow = (label, value, valueClass = '') => {
                 if (value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0)) return '';
                 return `
@@ -685,6 +555,7 @@
                 `;
             };
 
+            // Helper for ability/attack/stats blocks with game-box styling
             const addThemedSection = (title, contentHtml) => {
                 if (!contentHtml.trim()) return '';
                 return `
@@ -695,6 +566,7 @@
                 `;
             };
 
+            // Main Header
             let detailsHtml = `
                 <div class="text-center md:text-left mb-4">
                     <h2 class="text-3xl font-black mb-1 text-red-700 uppercase leading-none">${card.name}</h2>
@@ -709,6 +581,7 @@
                 </div>
             `;
 
+            // Abilities
             if (card.abilities && card.abilities.length > 0) {
                 let abilitiesHtml = card.abilities.map(ability => `
                     <div class="mb-2">
@@ -719,6 +592,7 @@
                 detailsHtml += addThemedSection('Abilities', abilitiesHtml);
             }
 
+            // Attacks
             if (card.attacks && card.attacks.length > 0) {
                 let attacksHtml = card.attacks.map(attack => `
                     <div class="mb-2">
@@ -729,6 +603,7 @@
                 detailsHtml += addThemedSection('Attacks', attacksHtml);
             }
 
+            // Weaknesses, Resistances, Retreat Cost
             let statsHtml = '';
             if (card.weaknesses && card.weaknesses.length > 0) {
                 statsHtml += `<p class="text-sm text-gray-700">Weakness: ${card.weaknesses.map(w => `${getTypeIcon(w.type)} ${w.type} ${w.value}`).join(', ')}</p>`;
@@ -741,6 +616,7 @@
             }
             detailsHtml += addThemedSection('Stats', statsHtml);
 
+            // General Info
             detailsHtml += addThemedSection('Card Info', `
                 ${addDetailRow('Set', card.set?.name || 'N/A')}
                 ${addDetailRow('Rarity', card.rarity || 'N/A')}
@@ -748,6 +624,7 @@
                 ${addDetailRow('Release Date', card.set?.releaseDate || 'N/A')}
             `);
 
+            // Flavor Text
             if (card.flavorText) {
                 detailsHtml += addThemedSection('Flavor Text', `<p class="text-sm italic text-gray-600 leading-tight">"${card.flavorText}"</p>`);
             }
@@ -809,18 +686,14 @@
             return cardElement.firstElementChild;
         }
 
-        function displayCards(cards) {
-            resultsContainer.innerHTML = '';
-            if (cards.length === 0) return;
-            if (currentView === 'grid') {
-                resultsContainer.className = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6';
-                cards.forEach(card => resultsContainer.appendChild(createCardElement(card, displayCardAsGridTemplate(card))));
-            } else { 
-                resultsContainer.className = 'space-y-4';
-                cards.forEach(card => resultsContainer.appendChild(createCardElement(card, displayCardAsListTemplate(card))));
-            }
+        function displayCardAsGrid(card) {
+            resultsContainer.appendChild(createCardElement(card, displayCardAsGridTemplate(card)));
         }
         
+        function displayCardAsList(card) {
+            resultsContainer.appendChild(createCardElement(card, displayCardAsListTemplate(card)));
+        }
+
         // --- Authentication ---
         function setAuthMode(isRegister) {
             isRegistering = isRegister;
@@ -1140,35 +1013,9 @@
             </header>
 
             <div class="game-box p-4 md:p-6">
-                <!-- My List Stats -->
-                <div class="mb-6 pb-6 border-b-4 border-dashed border-gray-300">
-                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
-                        <div class="flex justify-between items-center p-2 game-box-thin">
-                            <span class="font-semibold">TOTAL CARDS:</span>
-                            <span id="listTotalCards" class="font-bold">0</span>
-                        </div>
-                        <div class="flex justify-between items-center p-2 game-box-thin">
-                            <span class="font-semibold">UNIQUE SPECIES:</span>
-                            <span id="listUniqueSpecies" class="font-bold">0/1025</span>
-                        </div>
-                        <div class="flex justify-between items-center p-2 game-box-thin">
-                            <span class="font-semibold">TOTAL HP:</span>
-                            <span id="listTotalHP" class="font-bold">0</span>
-                        </div>
-                        <div class="flex justify-between items-center p-2 game-box-thin">
-                            <span class="font-semibold">TOTAL ATTACKS:</span>
-                            <span id="listTotalAttacks" class="font-bold">0</span>
-                        </div>
-                        <div class="flex justify-between items-center p-2 game-box-thin">
-                            <span class="font-semibold">TOTAL ABILITIES:</span>
-                            <span id="listTotalAbilities" class="font-bold">0</span>
-                        </div>
-                    </div>
-                </div>
-
                 <!-- My List Sorting Controls -->
                 <div id="myListSortControls" class="grid grid-cols-2 lg:grid-cols-3 gap-2 text-xs border-y-2 border-black py-2 mb-4">
-                    <!-- Sort Field Buttons -->
+                    <!-- Sort by Pokedex Number -->
                     <div class="flex items-center gap-2">
                         <span class="font-bold">SORT BY:</span>
                         <button data-field="pokedex" class="sort-field-btn game-btn p-1 border-2">#</button>
