@@ -199,10 +199,16 @@
             const userDocRef = doc(db, "artifacts", appId, "users", userId, "collection", "data");
             
             unsubscribeFromCollection = onSnapshot(userDocRef, (docSnap) => {
-                completionList = docSnap.exists() ? docSnap.data().list || [] : [];
-                updateCollectionStats();
-                if (currentPage === 'myList') renderCompletionList();
-                else if (lastDisplayedCards.length > 0) displayCards(lastDisplayedCards);
+                const serverList = docSnap.exists() ? docSnap.data().list || [] : [];
+                if (JSON.stringify(serverList) !== JSON.stringify(completionList)) {
+                    completionList = serverList;
+                    if (currentPage === 'myList') {
+                        renderCompletionList();
+                    } else if (lastDisplayedCards.length > 0) {
+                        updateSingleCardView(lastDisplayedCards);
+                    }
+                }
+                 updateCollectionStats();
             });
         }
 
@@ -228,7 +234,7 @@
                 };
                 completionList.push(newEntry);
                 updateCollectionStats(); 
-                displayCards(lastDisplayedCards); 
+                updateSingleCardView(card.id);
                 showToast(`Added ${card.name} to your list!`);
                 await saveCollectionToFirestore();
             } else { showToast(`${card.name} is already in your list!`); }
@@ -239,10 +245,26 @@
             const removedItem = completionList.find(item => item.id === cardId);
             completionList = completionList.filter(item => item.id !== cardId);
             updateCollectionStats();
+            
+            if (currentPage === 'myList') {
+                renderCompletionList();
+            }
+            
             await saveCollectionToFirestore();
             if (removedItem) showToast(`${removedItem.name} was removed from the list.`);
         }
         
+        function updateSingleCardView(cardId) {
+             const cardElement = document.querySelector(`[data-card-id="${cardId}"] .card-btn`);
+             if (cardElement) {
+                const cardData = lastDisplayedCards.find(c => c.id === cardId) || completionList.find(c => c.id === cardId);
+                if (cardData) {
+                    const isCollected = completionList.some(item => item.id === cardId);
+                    updateCardButton(cardData, isCollected, cardElement);
+                }
+             }
+        }
+
         function updateCardButton(card, isCollected, button) {
             button.disabled = isCollected;
             button.className = 'w-full game-btn py-2 px-2 text-xs card-btn mt-auto';
@@ -345,30 +367,34 @@
         }
 
         function displayCardAsGridTemplate(card) {
-            return `<div class="text-center game-box p-2 flex flex-col justify-between">
-                <div>
-                    <div class="img-placeholder">
-                        <img alt="${card.name}" class="card-image w-full cursor-pointer opacity-0" loading="lazy">
+            return `<div>
+                <div class="text-center game-box p-2 flex flex-col justify-between h-full">
+                    <div>
+                        <div class="img-placeholder">
+                            <img alt="${card.name}" class="card-image w-full cursor-pointer opacity-0" loading="lazy">
+                        </div>
+                        <div class="mt-2 text-xs">
+                            <p class="font-bold truncate" title="${card.name}">${card.name}</p>
+                            <div class="card-details-info text-[10px] mt-1 mb-1 min-h-[42px]"></div>
+                        </div>
                     </div>
-                    <div class="mt-2 text-xs">
-                        <p class="font-bold truncate" title="${card.name}">${card.name}</p>
-                        <div class="card-details-info text-[10px] mt-1 mb-1 min-h-[42px]"></div>
-                    </div>
+                    <button class="card-btn"></button>
                 </div>
-                <button data-card-id="${card.id}" class="card-btn"></button>
             </div>`;
         }
         
         function displayCardAsListTemplate(card) {
-            return `<div class="game-box p-3 flex flex-col sm:flex-row items-center gap-4">
-                <div class="img-placeholder w-20 h-28 flex-shrink-0">
-                    <img alt="${card.name}" class="card-image w-20 h-28 object-cover cursor-pointer opacity-0" loading="lazy">
+            return `<div>
+                <div class="game-box p-3 flex flex-col sm:flex-row items-center gap-4">
+                    <div class="img-placeholder w-20 h-28 flex-shrink-0">
+                        <img alt="${card.name}" class="card-image w-20 h-28 object-cover cursor-pointer opacity-0" loading="lazy">
+                    </div>
+                    <div class="flex-grow text-center sm:text-left">
+                        <p class="font-bold text-base" title="${card.name}">${card.name}</p>
+                        <div class="card-details-info text-xs mt-1 mb-1"></div>
+                    </div>
+                    <button class="card-btn"></button>
                 </div>
-                <div class="flex-grow text-center sm:text-left">
-                    <p class="font-bold text-base" title="${card.name}">${card.name}</p>
-                    <div class="card-details-info text-xs mt-1 mb-1"></div>
-                </div>
-                <button data-card-id="${card.id}" class="card-btn"></button>
             </div>`;
         }
 
@@ -413,7 +439,6 @@
             const suggestions = new Set(); 
             for (const cardId in localCardDatabase) {
                 const card = localCardDatabase[cardId];
-                // **FIX**: Added a check for card.name to prevent errors on cards with no name property.
                 if (card.name && card.name.toLowerCase().startsWith(lowerCaseQuery)) {
                     suggestions.add(card.name);
                 }
@@ -556,6 +581,8 @@
         function createCardElement(card, templateHtml, context = 'search') {
             const cardElement = document.createElement('div');
             cardElement.innerHTML = templateHtml;
+            cardElement.firstElementChild.dataset.cardId = card.id;
+
             const isCollected = currentUser && completionList.some(item => item.id === card.id);
             const img = cardElement.querySelector('.card-image');
             const imageContainer = cardElement.querySelector('.img-placeholder');
@@ -625,6 +652,7 @@
 
             const actionButton = cardElement.querySelector('.card-btn');
             if (actionButton) {
+                actionButton.dataset.cardId = card.id;
                 if (context === 'myList') {
                     actionButton.textContent = 'REMOVE';
                     actionButton.className = 'w-full mt-auto game-btn py-2 px-2 text-xs card-btn game-btn-danger';
@@ -801,6 +829,8 @@
         .img-placeholder.w-20 { width: 5rem; aspect-ratio: 245 / 342; height: auto; }
         @keyframes pulse { 50% { opacity: .5; } }
         
+        /* **FIX**: Added 'position: relative' to the parent container */
+        #autocomplete-container { position: relative; }
         #autocomplete-results { position: absolute; top: 100%; left: 0; right: 0; z-index: 50; background-color: white; border: 3px solid #212121; margin-top: -3px; max-height: 200px; overflow-y: auto; }
         html.dark #autocomplete-results { background-color: #2a2a2a; border-color: #616161; }
         .suggestion-item { padding: 10px 12px; cursor: pointer; border-bottom: 2px solid #e0e0e0; font-size: 14px; }
@@ -809,9 +839,20 @@
         .suggestion-item:hover { background-color: #f0f0f0; }
         html.dark .suggestion-item:hover { background-color: #424242; }
 
-        #imageModal .modal-content-box { background-color: white; border: 4px solid #212121; box-shadow: 6px 6px 0px #212121; width: 90%; max-width: 90%; max-height: 95vh; overflow-y: auto; }
+        #imageModal .modal-content-box {
+            background-color: white; border: 4px solid #212121; box-shadow: 6px 6px 0px #212121;
+            width: 90%; max-width: 90%; max-height: 95vh; overflow-y: auto;
+        }
         html.dark #imageModal .modal-content-box { background-color: #1e1e1e; border-color: #424242; box-shadow: none; }
-        @media (min-width: 768px) { #imageModal .modal-content-box { max-width: 60rem; } }
+        
+        #imageModal .modal-image-container { width: 100%; margin-bottom: 1rem; }
+        #imageModal .modal-details-container { width: 100%; }
+
+        @media (min-width: 768px) { 
+            #imageModal .modal-content-box { max-width: 60rem; flex-direction: row; }
+            #imageModal .modal-image-container { width: 41.666667%; margin-bottom: 0; }
+            #imageModal .modal-details-container { width: 58.333333%; }
+        }
         @media (min-width: 1024px) { #imageModal .modal-content-box { max-width: 70rem; } }
 
         .custom-scrollbar::-webkit-scrollbar { width: 12px; }
@@ -827,6 +868,7 @@
         
         #closeModal { position: absolute; top: 10px; right: 10px; width: 3rem; height: 3rem; font-size: 1.5rem; color: white; border: 3px solid #212121; z-index: 60; display: flex; align-items: center; justify-content: center; cursor: pointer; }
         html.dark #closeModal { border-color: #f5f5f5; }
+
     </style>
 </head>
 <body class="antialiased">
@@ -843,9 +885,10 @@
     </div>
 
     <div class="max-w-7xl mx-auto p-4 md:p-8 relative z-10">
-        <header class="text-center mb-10 p-4 relative">
-            <h1 class="text-3xl md:text-4xl font-black mb-2 tracking-tighter">POKéMON TCG TRACKER</h1>
-            <button id="darkModeToggle" class="absolute top-0 right-0 game-btn p-3"></button>
+        <header class="relative flex items-center justify-between text-center mb-10 p-4">
+            <div class="w-12 h-12"></div> <!-- Spacer -->
+            <h1 class="text-xl sm:text-3xl md:text-4xl font-black tracking-tighter absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full px-16">POKéMON TCG TRACKER</h1>
+            <button id="darkModeToggle" class="game-btn p-3 z-10"></button>
         </header>
 
         <!-- Main Search View -->
@@ -861,7 +904,8 @@
                 </div>
 
                 <div class="max-w-2xl mx-auto mb-4 flex flex-col md:flex-row gap-4 items-center">
-                    <div id="autocomplete-container" class="flex-grow w-full">
+                    <!-- **FIX**: Added 'relative' class to fix positioning -->
+                    <div id="autocomplete-container" class="flex-grow w-full relative">
                         <input type="text" id="searchInput" class="game-input text-center w-full" placeholder="Loading...">
                         <div id="autocomplete-results" class="hidden"></div>
                     </div>
@@ -903,11 +947,11 @@
     </div>
     
     <div id="imageModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-black bg-opacity-70 dark:bg-opacity-80">
-        <div class="relative w-11/12 modal-content-box p-4 sm:p-6 flex flex-col md:flex-row gap-4 max-h-[95vh]">
-            <div class="flex-shrink-0 flex justify-center items-start md:w-5/12 lg:w-4/12">
+        <div class="relative w-11/12 modal-content-box p-4 sm:p-6 flex flex-col max-h-[95vh]">
+            <div class="modal-image-container flex-shrink-0 flex justify-center items-start">
                 <img id="modalImage" src="" alt="Pokémon Card Large View" class="w-full h-auto object-contain max-h-[85vh] rounded-lg">
             </div>
-            <div id="modalDetailsContainer" class="flex-grow md:w-7/12 lg:w-8/12 p-2 overflow-y-auto custom-scrollbar"></div>
+            <div id="modalDetailsContainer" class="modal-details-container flex-grow p-2 overflow-y-auto custom-scrollbar"></div>
             <button id="closeModal" class="absolute font-mono game-btn game-btn-danger">[X]</button>
         </div>
     </div>
