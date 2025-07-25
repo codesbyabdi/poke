@@ -22,8 +22,7 @@
         const modalImage = document.getElementById('modalImage');
         const modalDetailsContainer = document.getElementById('modalDetailsContainer');
         const closeModalButton = document.getElementById('closeModal');
-        const progressText = document.getElementById('progressText');
-        const progressBar = document.getElementById('progressBar');
+        const collectionStatsContainer = document.getElementById('collectionStatsContainer');
         const showListBtn = document.getElementById('showListBtn');
         const toastContainer = document.getElementById('toast-container');
         const userDisplay = document.getElementById('userDisplay');
@@ -40,18 +39,20 @@
         const toggleAuthMode = document.getElementById('toggleAuthMode');
         const autocompleteResults = document.getElementById('autocomplete-results');
         const statusDisplay = document.getElementById('statusDisplay');
+        const darkModeToggle = document.getElementById('darkModeToggle');
         
         // My List Page DOM Elements
         const searchView = document.getElementById('searchView');
         const myListFullPage = document.getElementById('myListFullPage');
         const myListFullPageContainer = document.getElementById('myListFullPageContainer');
         const backToSearchBtn = document.getElementById('backToSearchBtn');
-        const myListSortControls = document.getElementById('myListSortControls');
+        const searchSortControls = document.getElementById('searchSortControls');
+        const myListSortControlsContainer = document.getElementById('myListSortControls'); 
         const myListFilterControls = document.getElementById('myListFilterControls');
         const myListLetterFilters = document.getElementById('myListLetterFilters');
         const myListRangeFilters = document.getElementById('myListRangeFilters');
-        const myListGridViewBtn = document.getElementById('myListGridViewBtn'); // NEW
-        const myListListViewBtn = document.getElementById('myListListViewBtn'); // NEW
+        const myListGridViewBtn = document.getElementById('myListGridViewBtn');
+        const myListListViewBtn = document.getElementById('myListListViewBtn');
 
 
         // --- State and Config ---
@@ -60,12 +61,13 @@
         let currentUser = null;
         let unsubscribeFromCollection = null;
         let currentView = 'grid'; // For search results
-        let myListView = 'grid'; // For My List page (NEW)
+        let myListView = 'grid'; // For My List page
         let lastDisplayedCards = [];
         let localCardDatabase = {}; 
         let isRegistering = false;
-        let currentSort = { field: 'pokedex', direction: 'asc' }; // For My List page sorting
-        let currentFilter = { type: 'all', value: null }; // For My List page filtering
+        let searchSort = { field: 'pokedex', direction: 'asc' };
+        let myListSort = { field: 'pokedex', direction: 'asc' };
+        let currentFilter = { type: 'all', value: null };
         let currentPage = 'search'; 
 
         // --- Firebase Initialization ---
@@ -84,30 +86,21 @@
 
         // --- Helper for Type/Energy Icons ---
         const typeColors = {
-            Colorless: '#A8A77A', // Normal-like
-            Fire: '#EE8130',
-            Water: '#6390F0',
-            Grass: '#7AC74C',
-            Lightning: '#F7D02C', // Electric-like
-            Fighting: '#C22E28', // Fighting/Rock/Ground
-            Psychic: '#F95587',
-            Darkness: '#705746', // Dark
-            Metal: '#B7B7CE', // Steel
-            Dragon: '#6F35FC', // Dragon (often purple/blue)
-            Fairy: '#D685AD', // Fairy (often pink) - Note: Pokémon TCG has removed Fairy type
-            // Add more as needed based on card data
+            Colorless: '#A8A77A', Fire: '#EE8130', Water: '#6390F0', Grass: '#7AC74C',
+            Lightning: '#F7D02C', Fighting: '#C22E28', Psychic: '#F95587', Darkness: '#705746',
+            Metal: '#B7B7CE', Dragon: '#6F35FC', Fairy: '#D685AD',
         };
 
         function getTypeIcon(type, size = 'w-4 h-4') {
-            const color = typeColors[type] || '#ccc'; // Default to light gray if type not found
-            return `<span class="inline-flex items-center justify-center ${size} rounded-full border border-gray-600 align-middle mr-1 game-box-thin" style="background-color: ${color};">
+            const color = typeColors[type] || '#ccc';
+            return `<span class="inline-flex items-center justify-center ${size} rounded-full border border-gray-600 dark:border-gray-400 align-middle mr-1 game-box-thin" style="background-color: ${color};">
                         <span class="type-icon-text leading-none">${type.substring(0,1).toUpperCase()}</span>
-                    </span>`; // Uppercase for type icon text
+                    </span>`;
         }
 
         function formatCosts(costs) {
             if (!costs || costs.length === 0) return '';
-            return costs.map(cost => getTypeIcon(cost, 'w-5 h-5')).join(''); // Larger icons for costs
+            return costs.map(cost => getTypeIcon(cost, 'w-5 h-5')).join('');
         }
 
         // --- UI Functions ---
@@ -115,8 +108,7 @@
             const toast = document.createElement('div');
             toast.className = 'toast';
             toast.innerHTML = message;
-            // Removed clearing toastContainer, let multiple toasts stack or be replaced by CSS
-            toastContainer.innerHTML = ''; // Keep this to ensure only one toast visible at a time
+            toastContainer.innerHTML = ''; 
             toastContainer.appendChild(toast); 
         }
 
@@ -125,40 +117,68 @@
             if (page === 'myList') {
                 searchView.classList.add('hidden');
                 myListFullPage.classList.remove('hidden');
-                renderCompletionList(); // Render list when navigating to it
+                renderCompletionList();
             } else { // 'search'
                 searchView.classList.remove('hidden');
                 myListFullPage.classList.add('hidden');
-                displayCards(lastDisplayedCards); // Re-display last search results if returning
+                displayCards(lastDisplayedCards);
             }
         }
         
-        function updateProgress() {
-            const collectedPokedexNumbers = new Set(completionList.map(item => item.pokedex));
-            const collectedCount = collectedPokedexNumbers.size;
-            const percentage = (collectedCount / TOTAL_POKEMON_SPECIES) * 100;
-            progressText.textContent = `${collectedCount}/${TOTAL_POKEMON_SPECIES} (${percentage.toFixed(1)}%)`;
-            progressBar.style.width = `${percentage}%`;
+        function updateCollectionStats() {
+            if (!collectionStatsContainer) return;
+
+            const totalCards = completionList.length;
+            const uniquePokedex = new Set(completionList.map(c => c.pokedex)).size;
+            const uniqueSets = new Set(completionList.map(c => c.set.id)).size;
+            const rarityCounts = completionList.reduce((acc, card) => {
+                const rarity = card.rarity || 'Unknown';
+                acc[rarity] = (acc[rarity] || 0) + 1;
+                return acc;
+            }, {});
+
+            const rarityOrder = ['Common', 'Uncommon', 'Rare', 'Rare Holo', 'Promo', 'Amazing Rare', 'Rare ACE']; 
+            const rarityString = Object.entries(rarityCounts)
+                .sort(([a], [b]) => {
+                    const indexA = rarityOrder.indexOf(a);
+                    const indexB = rarityOrder.indexOf(b);
+                    if (indexA === -1) return 1;
+                    if (indexB === -1) return -1;
+                    return indexA - indexB;
+                })
+                .map(([rarity, count]) => `<span class="whitespace-nowrap">${rarity}: ${count}</span>`)
+                .join(' &middot; ');
+
+            collectionStatsContainer.innerHTML = `
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-2 text-xs">
+                    <div class="font-bold">UNIQUE SPECIES: <span class="font-normal text-blue-600 dark:text-blue-400">${uniquePokedex} / ${TOTAL_POKEMON_SPECIES}</span></div>
+                    <div class="font-bold">TOTAL CARDS: <span class="font-normal text-blue-600 dark:text-blue-400">${totalCards}</span></div>
+                    <div class="font-bold">UNIQUE SETS: <span class="font-normal text-blue-600 dark:text-blue-400">${uniqueSets}</span></div>
+                </div>
+                <div class="text-center text-[10px] mt-3 text-gray-500 dark:text-gray-400 tracking-tighter overflow-x-auto pb-1">
+                    ${rarityString || 'No cards collected yet.'}
+                </div>
+            `;
         }
 
-        function setActiveView(view) {
-            currentView = view; // For search results
-            gridViewBtn.classList.toggle('game-btn-active', view === 'grid');
-            listViewBtn.classList.toggle('game-btn-active', view === 'list');
-            displayCards(lastDisplayedCards);
-        }
-
-        function setMyListView(view) { // NEW: For My List page view toggle
-            myListView = view;
-            myListGridViewBtn.classList.toggle('game-btn-active', view === 'grid');
-            myListListViewBtn.classList.toggle('game-btn-active', view === 'list');
-            renderCompletionList(); // Re-render My List with new view
+        function setActiveView(view, list = 'search') {
+            if (list === 'search') {
+                currentView = view;
+                gridViewBtn.classList.toggle('game-btn-active', view === 'grid');
+                listViewBtn.classList.toggle('game-btn-active', view === 'list');
+                displayCards(lastDisplayedCards);
+            } else { // myList
+                myListView = view;
+                myListGridViewBtn.classList.toggle('game-btn-active', view === 'grid');
+                myListListViewBtn.classList.toggle('game-btn-active', view === 'list');
+                renderCompletionList();
+            }
         }
         
         function showStatus(message, isError = false) {
             statusDisplay.textContent = message;
             statusDisplay.classList.toggle('text-red-500', isError);
-            if (!message && !isError) {
+            if (message && !isError) {
                 setTimeout(() => { 
                     if(statusDisplay.textContent === message) statusDisplay.textContent = ''
                 }, 3000);
@@ -171,9 +191,7 @@
             try {
                 const userDocRef = doc(db, "artifacts", appId, "users", currentUser.uid, "collection", "data");
                 await setDoc(userDocRef, { list: completionList });
-            } catch (error) {
-                console.error("Error saving collection: ", error);
-            }
+            } catch (error) { console.error("Error saving collection: ", error); }
         }
 
         function listenToCollection(userId) {
@@ -182,9 +200,9 @@
             
             unsubscribeFromCollection = onSnapshot(userDocRef, (docSnap) => {
                 completionList = docSnap.exists() ? docSnap.data().list || [] : [];
-                updateProgress();
-                if (currentPage === 'myList') renderCompletionList(); 
-                displayCards(lastDisplayedCards); // Update collection status on search results
+                updateCollectionStats();
+                if (currentPage === 'myList') renderCompletionList();
+                else if (lastDisplayedCards.length > 0) displayCards(lastDisplayedCards);
             });
         }
 
@@ -198,41 +216,38 @@
             }
 
             if (!completionList.some(item => item.id === card.id)) {
-                // Ensure all relevant data points for My List display are stored
                 const newEntry = {
-                    id: card.id,
-                    pokedex: pokedexNumber,
-                    name: card.name,
-                    image: `https://images.pokemontcg.io/${card.set.id}/${card.number}.png`, // Small image for list
-                    set: { id: card.set.id, name: card.set.name, releaseDate: card.set.releaseDate},
-                    hp: card.hp,
-                    types: card.types,
-                    rarity: card.rarity,
-                    // Store other data needed for sorting on list page
-                    artist: card.artist, 
-                    supertype: card.supertype,
-                    subtype: card.subtype,
+                    id: card.id, pokedex: pokedexNumber, name: card.name, number: card.number,
+                    nationalPokedexNumbers: card.nationalPokedexNumbers,
+                    set: { 
+                        id: card.set.id, name: card.set.name, releaseDate: card.set.releaseDate,
+                        printedTotal: card.set.printedTotal, images: { symbol: card.set.images?.symbol }
+                    },
+                    hp: card.hp, types: card.types, rarity: card.rarity, artist: card.artist, 
+                    supertype: card.supertype, subtype: card.subtype,
                 };
                 completionList.push(newEntry);
-                await saveCollectionToFirestore();
+                updateCollectionStats(); 
+                displayCards(lastDisplayedCards); 
                 showToast(`Added ${card.name} to your list!`);
-            } else {
-                showToast(`${card.name} is already in your list!`);
-            }
+                await saveCollectionToFirestore();
+            } else { showToast(`${card.name} is already in your list!`); }
         }
 
         async function removeFromList(cardId) {
             if (!currentUser) return;
             const removedItem = completionList.find(item => item.id === cardId);
             completionList = completionList.filter(item => item.id !== cardId);
+            updateCollectionStats();
             await saveCollectionToFirestore();
             if (removedItem) showToast(`${removedItem.name} was removed from the list.`);
         }
         
         function updateCardButton(card, isCollected, button) {
             button.disabled = isCollected;
-            button.className = 'w-full mt-2 game-btn py-2 px-2 text-xs card-btn';
-            if (currentView === 'list') { // This class check is for search results, not My List
+            button.className = 'w-full game-btn py-2 px-2 text-xs card-btn mt-auto';
+            const view = (currentPage === 'search') ? currentView : myListView;
+            if (view === 'list') {
                 button.classList.add('sm:w-auto', 'sm:mt-0');
             }
             if (isCollected) {
@@ -244,56 +259,67 @@
             }
         }
 
-        // --- "My List" Sorting and Filtering ---
-        function setMyListSort(field, direction) { // Renamed to avoid conflict with general setSort
-            currentSort = { field, direction };
-            renderCompletionList(); 
+        // --- Sorting and Filtering ---
+        function sortCards(cards, sortConfig) {
+            return [...cards].sort((a, b) => {
+                let valA, valB;
+                switch (sortConfig.field) {
+                    case 'pokedex':
+                        valA = a.nationalPokedexNumbers?.[0] || a.pokedex || Infinity;
+                        valB = b.nationalPokedexNumbers?.[0] || b.pokedex || Infinity;
+                        break;
+                    case 'name': valA = a.name; valB = b.name; break;
+                    case 'hp': valA = parseInt(a.hp) || 0; valB = parseInt(b.hp) || 0; break;
+                    case 'releaseDate':
+                        valA = new Date(a.set?.releaseDate || '1900-01-01');
+                        valB = new Date(b.set?.releaseDate || '1900-01-01');
+                        break;
+                    case 'rarity': valA = a.rarity || ''; valB = b.rarity || ''; break;
+                    default: return 0;
+                }
+                if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+                if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+                return 0;
+            });
         }
         
-        function setMyListFilter(type, value) { // Renamed to avoid conflict with general setFilter
+        function setMyListFilter(type, value) {
             currentFilter = { type, value };
             renderCompletionList(); 
+        }
+
+        function createSortControls(container, sortState, onSortChange) {
+            container.innerHTML = `
+                <label for="${container.id}-select" class="font-bold text-xs mr-2">SORT BY:</label>
+                <select id="${container.id}-select" class="game-input text-xs p-2 sort-select">
+                    <option value="pokedex">Pokédex #</option>
+                    <option value="name">Name</option>
+                    <option value="hp">HP</option>
+                    <option value="releaseDate">Release Date</option>
+                    <option value="rarity">Rarity</option>
+                </select>
+                <button class="game-btn p-2 text-xs sort-direction-btn">▲</button>
+            `;
+            const select = container.querySelector('.sort-select');
+            const directionBtn = container.querySelector('.sort-direction-btn');
+            select.value = sortState.field;
+            directionBtn.innerHTML = sortState.direction === 'asc' ? '▲' : '▼';
+
+            select.addEventListener('change', (e) => {
+                sortState.field = e.target.value;
+                onSortChange();
+            });
+            directionBtn.addEventListener('click', () => {
+                sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc';
+                directionBtn.innerHTML = sortState.direction === 'asc' ? '▲' : '▼';
+                onSortChange();
+            });
         }
 
         function renderCompletionList() {
             const container = myListFullPageContainer;
             container.innerHTML = '';
             
-            const createButton = (parent, type, value, text, isTextSmall = false) => {
-                const button = document.createElement('button');
-                button.dataset.type = type;
-                button.dataset.value = value;
-                button.className = `filter-btn game-btn p-1 border-2 ${isTextSmall ? 'text-[8px]' : ''}`;
-                button.textContent = text;
-                parent.appendChild(button);
-            };
-            
-            myListLetterFilters.innerHTML = ''; 
-            myListRangeFilters.innerHTML = '';
-
-            createButton(myListLetterFilters, 'all', 'all', 'ALL');
-
-            if (completionList.length > 0) {
-                const availableLetters = [...new Set(completionList.map(c => c.name[0].toUpperCase()))].sort();
-                availableLetters.forEach(letter => createButton(myListLetterFilters, 'letter', letter, letter));
-
-                const getRange = num => `${Math.floor(num / 50) * 50 + 1}-${Math.floor(num / 50) * 50 + 50}`;
-                const availableRanges = [...new Set(completionList.map(c => getRange(c.pokedex)))].sort((a,b) => parseInt(a) - parseInt(b));
-                availableRanges.forEach(range => createButton(myListRangeFilters, 'range', range, range, true));
-            }
-            
-            // Update active state on sort/filter buttons
-            document.querySelectorAll('#myListSortControls button, #myListFilterControls button').forEach(btn => btn.classList.remove('game-btn-active'));
-            const activeSortBtn = document.querySelector(`#myListSortControls .sort-btn[data-field='${currentSort.field}'][data-direction='${currentSort.direction}']`);
-            if(activeSortBtn) activeSortBtn.classList.add('game-btn-active');
-            
-            const activeFilterBtn = document.querySelector(`#myListFilterControls .filter-btn[data-type='${currentFilter.type}'][data-value='${currentFilter.value}']`);
-            if(activeFilterBtn) activeFilterBtn.classList.add('game-btn-active');
-
-            // Apply view active state
-            myListGridViewBtn.classList.toggle('game-btn-active', myListView === 'grid');
-            myListListViewBtn.classList.toggle('game-btn-active', myListView === 'list');
-
             let filteredList = completionList;
             if(currentFilter.type === 'letter'){
                 filteredList = completionList.filter(item => item.name.toUpperCase().startsWith(currentFilter.value));
@@ -302,78 +328,45 @@
                 filteredList = completionList.filter(item => item.pokedex >= min && item.pokedex <= max);
             }
 
-            const sortedList = [...filteredList].sort((a, b) => {
-                let valA, valB;
-                switch (currentSort.field) {
-                    case 'pokedex':
-                        valA = a.pokedex;
-                        valB = b.pokedex;
-                        break;
-                    case 'name':
-                        valA = a.name;
-                        valB = b.name;
-                        break;
-                    case 'hp': // NEW SORT
-                        valA = parseInt(a.hp) || 0;
-                        valB = parseInt(b.hp) || 0;
-                        break;
-                    case 'releaseDate': // NEW SORT
-                        valA = new Date(a.set?.releaseDate || '1900/01/01'); // Default to old date if missing
-                        valB = new Date(b.set?.releaseDate || '1900/01/01');
-                        break;
-                    case 'rarity': // NEW SORT
-                        valA = a.rarity || '';
-                        valB = b.rarity || '';
-                        break;
-                    default:
-                        return 0;
-                }
-
-                if (valA < valB) return currentSort.direction === 'asc' ? -1 : 1;
-                if (valA > valB) return currentSort.direction === 'asc' ? 1 : -1;
-                return 0;
-            });
+            const sortedList = sortCards(filteredList, myListSort);
             
             if (sortedList.length === 0) {
-                container.innerHTML = `<div class="text-center p-4 text-gray-500">No cards match the filter...</div>`;
+                container.innerHTML = `<div class="text-center p-4 text-gray-500 dark:text-gray-400">No cards match the filter...</div>`;
                 return;
             }
 
-            // Render based on myListView
             if (myListView === 'grid') {
-                container.className = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6 custom-scrollbar'; // Apply grid classes
-                sortedList.forEach(card => container.appendChild(createCardElement(card, displayCardAsGridTemplate(card)))); // Use template from helper function
-            } else { // list view
-                container.className = 'space-y-4 custom-scrollbar'; // Apply list classes
-                sortedList.forEach(card => container.appendChild(createCardElement(card, displayCardAsListTemplate(card)))); // Use template from helper function
+                container.className = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 custom-scrollbar';
+                sortedList.forEach(card => container.appendChild(createCardElement(card, displayCardAsGridTemplate(card), 'myList')));
+            } else {
+                container.className = 'space-y-4 custom-scrollbar';
+                sortedList.forEach(card => container.appendChild(createCardElement(card, displayCardAsListTemplate(card), 'myList')));
             }
         }
 
-        // Helper function for grid view template (used by both search and my list)
         function displayCardAsGridTemplate(card) {
-            return `<div class="text-center">
-                <div class="img-placeholder">
-                    <img alt="${card.name}" class="card-image w-full border-4 border-black cursor-pointer opacity-0" loading="lazy">
-                </div>
-                <div class="mt-2 text-xs">
-                    <p class="font-bold truncate">${card.name}</p>
-                    <div class="card-details-info text-gray-700 text-[10px] mt-1 mb-1"></div>
+            return `<div class="text-center game-box p-2 flex flex-col justify-between">
+                <div>
+                    <div class="img-placeholder">
+                        <img alt="${card.name}" class="card-image w-full cursor-pointer opacity-0" loading="lazy">
+                    </div>
+                    <div class="mt-2 text-xs">
+                        <p class="font-bold truncate" title="${card.name}">${card.name}</p>
+                        <div class="card-details-info text-[10px] mt-1 mb-1 min-h-[42px]"></div>
+                    </div>
                 </div>
                 <button data-card-id="${card.id}" class="card-btn"></button>
             </div>`;
         }
-
-        // Helper function for list view template (used by both search and my list)
+        
         function displayCardAsListTemplate(card) {
             return `<div class="game-box p-3 flex flex-col sm:flex-row items-center gap-4">
                 <div class="img-placeholder w-20 h-28 flex-shrink-0">
-                    <img alt="${card.name}" class="card-image w-20 h-28 object-cover border-2 border-black cursor-pointer opacity-0" loading="lazy">
+                    <img alt="${card.name}" class="card-image w-20 h-28 object-cover cursor-pointer opacity-0" loading="lazy">
                 </div>
                 <div class="flex-grow text-center sm:text-left">
-                    <p class="font-bold text-base">${card.name}</p>
-                    <div class="card-details-info text-gray-700 text-xs mt-1 mb-1"></div>
-                    <p class="text-xs text-gray-500">#${String(card.nationalPokedexNumbers?.[0] || 'N/A').padStart(3, '0')}</p>
-                    ${card.rarity ? `<p class="text-xs text-gray-500 capitalize">Rarity: ${card.rarity.toLowerCase()}</p>` : ''}
+                    <p class="font-bold text-base" title="${card.name}">${card.name}</p>
+                    <div class="card-details-info text-xs mt-1 mb-1"></div>
                 </div>
                 <button data-card-id="${card.id}" class="card-btn"></button>
             </div>`;
@@ -394,56 +387,34 @@
                         localCardDatabase = tempDb;
                         showStatus('DATABASE LOADED FROM CACHE');
                         return;
-                    } else {
-                         localStorage.removeItem('pokemon-card-db');
-                    }
-                } catch (e) {
-                    console.error("Error parsing cached DB, clearing:", e);
-                    localStorage.removeItem('pokemon-card-db');
-                }
+                    } else { localStorage.removeItem('pokemon-card-db'); }
+                } catch (e) { localStorage.removeItem('pokemon-card-db'); }
             }
             
             try {
                 showStatus('SYNCING DATABASE (first load might take a moment)...');
                 const response = await fetch(dataUrl);
-                if (!response.ok) {
-                    throw new Error(`Network response not ok. Status: ${response.status} - ${response.statusText}`);
-                }
+                if (!response.ok) throw new Error(`Network response not ok. Status: ${response.status}`);
                 const dataArray = await response.json(); 
-                
                 const tempDb = {};
                 dataArray.forEach(card => tempDb[card.id] = card);
                 localCardDatabase = tempDb;
-
                 localStorage.setItem('pokemon-card-db', JSON.stringify(dataArray)); 
                 showStatus('DATABASE SYNCED. READY!');
             } catch (error) {
                 showStatus(`DB SYNC FAILED: ${error.message}`, true);
-                if (storedDb) {
-                    try {
-                        const dataArray = JSON.parse(storedDb);
-                        const tempDb = {};
-                        dataArray.forEach(card => tempDb[card.id] = card);
-                        localCardDatabase = tempDb;
-                        showStatus('Loaded from cache due to sync failure.', false);
-                    } catch (e) {
-                        console.error("Error parsing fallback cached DB:", e);
-                        showStatus('No local cache found or it is corrupted.', true);
-                    }
-                }
             }
         }
 
         // --- Local Search ---
         function getAutocompleteSuggestions(query) {
             if (!query || Object.keys(localCardDatabase).length === 0) return displayAutocomplete([]);
-
             const lowerCaseQuery = query.toLowerCase();
             const suggestions = new Set(); 
-
             for (const cardId in localCardDatabase) {
                 const card = localCardDatabase[cardId];
-                if (card.name.toLowerCase().startsWith(lowerCaseQuery)) {
+                // **FIX**: Added a check for card.name to prevent errors on cards with no name property.
+                if (card.name && card.name.toLowerCase().startsWith(lowerCaseQuery)) {
                     suggestions.add(card.name);
                 }
                 if (suggestions.size >= 100) break; 
@@ -452,11 +423,10 @@
         }
 
         function searchLocalDatabase(query) {
-            resultsContainer.innerHTML = '';
-            lastDisplayedCards = [];
             showStatus('SEARCHING...');
-            
             if (!query) {
+                lastDisplayedCards = [];
+                resultsContainer.innerHTML = '';
                 showStatus('');
                 return;
             }
@@ -466,28 +436,17 @@
             let results = [];
 
             for (const cardId in localCardDatabase) {
+                if (!Object.prototype.hasOwnProperty.call(localCardDatabase, cardId)) continue;
                 const card = localCardDatabase[cardId];
                 if (isPokedexNumber) {
-                    const pokedexNumber = parseInt(query, 10);
-                    if (Array.isArray(card.nationalPokedexNumbers) && card.nationalPokedexNumbers.includes(pokedexNumber)) {
+                    if (Array.isArray(card.nationalPokedexNumbers) && card.nationalPokedexNumbers.includes(parseInt(query, 10))) {
                         results.push(card);
                     }
-                } else {
-                    if (card.name.toLowerCase().includes(lowerCaseQuery)) {
-                        results.push(card);
-                    }
+                } else if (card.name && card.name.toLowerCase().includes(lowerCaseQuery)) {
+                    results.push(card);
                 }
             }
             
-            results.sort((a, b) => {
-                const pokedexA = a.nationalPokedexNumbers?.[0] || Infinity;
-                const pokedexB = b.nationalPokedexNumbers?.[0] || Infinity;
-
-                if (pokedexA < pokedexB) return -1;
-                if (pokedexA > pokedexB) return 1;
-                return a.name.localeCompare(b.name); // Secondary sort by name
-            });
-
             lastDisplayedCards = results;
             displayCards(lastDisplayedCards);
 
@@ -515,173 +474,170 @@
 
         function displayCards(cards) {
             resultsContainer.innerHTML = '';
-            if (cards.length === 0) return;
-            // Use existing currentView for search results
+            const sortedCards = sortCards(cards, searchSort);
+
+            if (sortedCards.length === 0) return;
+
             if (currentView === 'grid') {
-                resultsContainer.className = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6';
-                cards.forEach(card => resultsContainer.appendChild(createCardElement(card, displayCardAsGridTemplate(card))));
-            } else { // List view
+                resultsContainer.className = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4';
+                sortedCards.forEach(card => resultsContainer.appendChild(createCardElement(card, displayCardAsGridTemplate(card), 'search')));
+            } else {
                 resultsContainer.className = 'space-y-4';
-                cards.forEach(card => resultsContainer.appendChild(createCardElement(card, displayCardAsListTemplate(card))));
+                sortedCards.forEach(card => resultsContainer.appendChild(createCardElement(card, displayCardAsListTemplate(card), 'search')));
             }
         }
         
-        // NEW FUNCTION: showCardDetailsModal
         function showCardDetailsModal(card) {
-            const largeImageUrl = `https://images.pokemontcg.io/${card.set.id}/${card.number}_hires.png`;
+            const pokedexNumber = card.nationalPokedexNumbers?.[0] || card.pokedex || 'N/A';
+            const largeImageUrl = `https://images.pokemontcg.io/${card.set?.id}/${card.number}_hires.png`;
             modalImage.src = largeImageUrl;
-            modalDetailsContainer.innerHTML = ''; // Clear previous details
+            modalImage.onerror = () => { modalImage.src = `https://images.pokemontcg.io/${card.set?.id}/${card.number}.png`; }
+            modalDetailsContainer.innerHTML = '';
 
-            // Helper for detail rows
-            const addDetailRow = (label, value, valueClass = '') => {
-                if (value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0)) return '';
-                return `
-                    <div class="flex items-center gap-2 mb-1">
-                        <span class="font-bold text-gray-800 detail-label">${label}:</span>
-                        <span class="text-gray-700 detail-value ${valueClass}">${value}</span>
-                    </div>
-                `;
+            const addDetailRow = (label, value) => {
+                if (!value || (Array.isArray(value) && value.length === 0)) return '';
+                return `<p class="text-xs"><span class="font-bold uppercase">${label}:</span> ${value}</p>`;
             };
 
-            // Helper for ability/attack/stats blocks with game-box styling
             const addThemedSection = (title, contentHtml) => {
                 if (!contentHtml.trim()) return '';
                 return `
                     <div class="game-box p-3 mb-4">
-                        <h3 class="text-md font-bold mb-2 uppercase text-blue-800 border-b-2 border-gray-300 pb-1">${title}</h3>
-                        ${contentHtml}
+                        <h3 class="text-sm font-bold mb-2 uppercase text-blue-800 dark:text-blue-400 border-b-2 border-gray-300 dark:border-gray-600 pb-1">${title}</h3>
+                        <div class="space-y-2">${contentHtml}</div>
                     </div>
                 `;
             };
 
-            // Main Header
             let detailsHtml = `
-                <div class="text-center md:text-left mb-4">
-                    <h2 class="text-3xl font-black mb-1 text-red-700 uppercase leading-none">${card.name}</h2>
-                    <p class="text-xl font-bold text-gray-800 leading-none">
-                        ${card.hp ? `<span class="text-red-600">HP ${card.hp}</span> ` : ''}
-                        ${card.types && card.types.length > 0 ? card.types.map(type => getTypeIcon(type)).join('') : ''}
-                    </p>
-                    <p class="text-sm text-gray-600 mt-1">
-                        #${String(card.nationalPokedexNumbers?.[0] || 'N/A').padStart(3, '0')} 
-                        ${card.supertype || ''} ${card.subtype ? `— ${card.subtype}` : ''}
+                <div class="mb-4">
+                    <h2 class="text-3xl font-black mb-1 text-red-700 dark:text-red-500 uppercase leading-none">${card.name}</h2>
+                    <div class="flex items-center text-lg font-bold text-gray-800 dark:text-gray-200 leading-none">
+                        ${card.hp ? `<span class="text-red-600 dark:text-red-500 mr-2">HP ${card.hp}</span> ` : ''}
+                        ${card.types?.map(type => getTypeIcon(type, 'w-6 h-6')).join('') || ''}
+                    </div>
+                    <p class="text-sm text-gray-600 dark:text-gray-400 mt-2">
+                        #${String(pokedexNumber).padStart(3, '0')} ${card.supertype || ''} Pokémon
                     </p>
                 </div>
             `;
 
-            // Abilities
-            if (card.abilities && card.abilities.length > 0) {
-                let abilitiesHtml = card.abilities.map(ability => `
-                    <div class="mb-2">
-                        <p class="font-semibold text-gray-900">${ability.name}</p>
-                        <p class="text-xs text-gray-600 leading-tight">${ability.text}</p>
-                    </div>
-                `).join('');
-                detailsHtml += addThemedSection('Abilities', abilitiesHtml);
-            }
-
-            // Attacks
-            if (card.attacks && card.attacks.length > 0) {
+            if (card.attacks?.length > 0) {
                 let attacksHtml = card.attacks.map(attack => `
-                    <div class="mb-2">
-                        <p class="font-semibold text-gray-900">${formatCosts(attack.cost)} ${attack.name} <span class="text-sm font-normal text-blue-600">(${attack.damage ? attack.damage + ' Damage' : 'No Damage'})</span></p>
-                        <p class="text-xs text-gray-600 leading-tight">${attack.text}</p>
+                    <div>
+                        <p class="font-bold text-gray-900 dark:text-gray-100 flex justify-between items-center">
+                            <span class="flex items-center gap-1">${formatCosts(attack.cost)} ${attack.name}</span>
+                            ${attack.damage ? `<span class="text-blue-600 dark:text-blue-400">${attack.damage} Damage</span>` : ''}
+                        </p>
+                        ${attack.text ? `<p class="text-xs text-gray-600 dark:text-gray-400 leading-tight mt-1">${attack.text}</p>`: ''}
                     </div>
                 `).join('');
                 detailsHtml += addThemedSection('Attacks', attacksHtml);
             }
-
-            // Weaknesses, Resistances, Retreat Cost
+            
             let statsHtml = '';
-            if (card.weaknesses && card.weaknesses.length > 0) {
-                statsHtml += `<p class="text-sm text-gray-700">Weakness: ${card.weaknesses.map(w => `${getTypeIcon(w.type)} ${w.type} ${w.value}`).join(', ')}</p>`;
-            }
-            if (card.resistances && card.resistances.length > 0) {
-                statsHtml += `<p class="text-sm text-gray-700">Resistance: ${card.resistances.map(r => `${getTypeIcon(r.type)} ${r.type} ${r.value}`).join(', ')}</p>`;
-            }
-            if (card.retreatCost && card.retreatCost.length > 0) {
-                statsHtml += `<p class="text-sm text-gray-700">Retreat Cost: ${formatCosts(card.retreatCost)}</p>`;
-            }
-            detailsHtml += addThemedSection('Stats', statsHtml);
+            if (card.weaknesses?.length > 0) statsHtml += `<p class="text-xs font-bold">Weakness: ${card.weaknesses.map(w => `${getTypeIcon(w.type, 'w-4 h-4')} ${w.value}`).join(', ')}</p>`;
+            if (card.resistances?.length > 0) statsHtml += `<p class="text-xs font-bold">Resistance: ${card.resistances.map(r => `${getTypeIcon(r.type, 'w-4 h-4')} ${r.value}`).join(', ')}</p>`;
+            if (card.retreatCost?.length > 0) statsHtml += `<p class="text-xs font-bold">Retreat Cost: ${formatCosts(card.retreatCost)}</p>`;
+            if (statsHtml) detailsHtml += addThemedSection('Stats', statsHtml);
 
-            // General Info
-            detailsHtml += addThemedSection('Card Info', `
-                ${addDetailRow('Set', card.set?.name || 'N/A')}
-                ${addDetailRow('Rarity', card.rarity || 'N/A')}
-                ${addDetailRow('Artist', card.artist || 'N/A')}
-                ${addDetailRow('Release Date', card.set?.releaseDate || 'N/A')}
-            `);
-
-            // Flavor Text
-            if (card.flavorText) {
-                detailsHtml += addThemedSection('Flavor Text', `<p class="text-sm italic text-gray-600 leading-tight">"${card.flavorText}"</p>`);
-            }
+            let cardInfoHtml = `
+                ${addDetailRow('Set', card.set?.name)} ${addDetailRow('Rarity', card.rarity)}
+                ${addDetailRow('Artist', card.artist)} ${addDetailRow('Release', card.set?.releaseDate)}
+            `;
+            detailsHtml += addThemedSection('Card Info', cardInfoHtml);
+            
+            if (card.flavorText) detailsHtml += addThemedSection('Flavor Text', `<p class="text-xs italic text-gray-600 dark:text-gray-400 leading-tight">"${card.flavorText}"</p>`);
             
             modalDetailsContainer.innerHTML = detailsHtml; 
             imageModal.classList.remove('hidden'); 
         }
 
-
-        function createCardElement(card, templateHtml) { // Changed 'template' to 'templateHtml' for clarity
+        function createCardElement(card, templateHtml, context = 'search') {
             const cardElement = document.createElement('div');
-            cardElement.innerHTML = templateHtml; // Use the provided template HTML
+            cardElement.innerHTML = templateHtml;
             const isCollected = currentUser && completionList.some(item => item.id === card.id);
             const img = cardElement.querySelector('.card-image');
             const imageContainer = cardElement.querySelector('.img-placeholder');
-            const smallImageUrl = `https://images.pokemontcg.io/${card.set.id}/${card.number}.png`;
+            const smallImageUrl = `https://images.pokemontcg.io/${card.set?.id}/${card.number}.png`;
 
             const cardDetailsDiv = cardElement.querySelector('.card-details-info');
             if (cardDetailsDiv) {
-                let detailsHtml = '';
-                if (card.hp) {
-                    detailsHtml += `<span class="text-red-600 font-bold">HP ${card.hp}</span> `;
+                const setSymbolUrl = card.set?.images?.symbol;
+                const setName = card.set?.name || '';
+                const printedTotal = card.set?.printedTotal;
+                const cardNumber = card.number || '';
+                const rarity = card.rarity || '';
+                const pokedexNumber = card.nationalPokedexNumbers?.[0] || card.pokedex;
+
+                let numberString;
+                if (cardNumber && printedTotal) {
+                    numberString = `${cardNumber}/${printedTotal}`;
+                } else if (cardNumber) {
+                    numberString = cardNumber; 
+                } else {
+                    numberString = '';
                 }
-                if (card.types && card.types.length > 0) {
-                    detailsHtml += card.types.map(type => getTypeIcon(type, 'w-3 h-3')).join('');
-                }
-                if (card.set?.releaseDate) {
-                    detailsHtml += `<span class="ml-2 text-gray-500 text-[9px] whitespace-nowrap">(Released: ${card.set.releaseDate})</span>`;
-                }
+
+                let detailsHtml = `
+                    <div class="space-y-1 text-left p-1">
+                        <div class="flex items-center justify-between text-gray-600 dark:text-gray-400 gap-2" title="Set: ${setName}">
+                            <div class="flex items-center gap-1.5 min-w-0">
+                                ${setSymbolUrl ? `<img src="${setSymbolUrl}" alt="${setName}" class="h-4 w-4 flex-shrink-0 object-contain">` : '<div class="w-4 h-4"></div>'}
+                                <span class="truncate font-semibold">${setName}</span>
+                            </div>
+                            <span class="font-bold whitespace-nowrap">${numberString}</span>
+                        </div>
+                        <div class="flex items-center justify-between text-gray-600 dark:text-gray-400" title="Rarity: ${rarity} | Pokédex: #${pokedexNumber ? String(pokedexNumber).padStart(3, '0') : 'N/A'}">
+                            <span class="capitalize truncate">${rarity}</span>
+                            ${pokedexNumber ? `<span>#${String(pokedexNumber).padStart(3, '0')}</span>` : '<span></span>'}
+                        </div>
+                    </div>
+                `;
                 cardDetailsDiv.innerHTML = detailsHtml;
             }
             
             if(img && imageContainer) {
                 const imageLoader = new Image();
-                imageLoader.src = smallImageUrl;
-                imageLoader.onload = () => {
-                    img.src = imageLoader.src;
-                    img.classList.remove('opacity-0');
-                    imageContainer.classList.remove('img-placeholder');
-                };
-                imageLoader.onerror = () => {
-                    imageContainer.innerHTML = `<div class="w-full h-full flex items-center justify-center text-xs p-2">Image missing</div>`;
-                };
+                if (card.set?.id && card.number) {
+                    imageLoader.src = smallImageUrl;
+                    imageLoader.onload = () => {
+                        img.src = imageLoader.src;
+                        img.classList.remove('opacity-0');
+                        imageContainer.classList.remove('img-placeholder');
+                    };
+                    imageLoader.onerror = () => {
+                        imageContainer.innerHTML = `<div class="w-full h-full flex items-center justify-center bg-gray-300 dark:bg-gray-700 text-xs p-2 text-center">Image Not Found</div>`;
+                        imageContainer.classList.remove('img-placeholder');
+                    };
+                } else {
+                     imageContainer.innerHTML = `<div class="w-full h-full flex items-center justify-center bg-gray-300 dark:bg-gray-700 text-xs p-2 text-center">No Image Data</div>`;
+                     imageContainer.classList.remove('img-placeholder');
+                }
             }
             
             if (img) {
                 img.addEventListener('click', () => {
-                    showCardDetailsModal(card);
+                    const fullCardData = localCardDatabase[card.id] || card;
+                    showCardDetailsModal(fullCardData);
                 });
             }
 
-            const addButton = cardElement.querySelector('.card-btn');
-            if (card.nationalPokedexNumbers && addButton) {
-                updateCardButton(card, isCollected, addButton);
-                addButton.onclick = () => addToList(card);
-            } else if (addButton) {
-                addButton.remove();
+            const actionButton = cardElement.querySelector('.card-btn');
+            if (actionButton) {
+                if (context === 'myList') {
+                    actionButton.textContent = 'REMOVE';
+                    actionButton.className = 'w-full mt-auto game-btn py-2 px-2 text-xs card-btn game-btn-danger';
+                    if (myListView === 'list') actionButton.classList.add('sm:w-auto', 'sm:mt-0');
+                    actionButton.onclick = (e) => { e.stopPropagation(); removeFromList(card.id); };
+                } else {
+                    if (card.nationalPokedexNumbers) {
+                        updateCardButton(card, isCollected, actionButton); 
+                        actionButton.onclick = (e) => { e.stopPropagation(); addToList(card); };
+                    } else { actionButton.remove(); }
+                }
             }
             return cardElement.firstElementChild;
-        }
-
-        function displayCardAsGrid(card) {
-            // This is just a call to createCardElement with the specific template
-            resultsContainer.appendChild(createCardElement(card, displayCardAsGridTemplate(card)));
-        }
-        
-        function displayCardAsList(card) {
-            // This is just a call to createCardElement with the specific template
-            resultsContainer.appendChild(createCardElement(card, displayCardAsListTemplate(card)));
         }
 
         // --- Authentication ---
@@ -701,9 +657,7 @@
             try {
                 if (isRegistering) await createUserWithEmailAndPassword(auth, email, password);
                 else await signInWithEmailAndPassword(auth, email, password);
-            } catch (error) {
-                loginError.textContent = error.message.replace('Firebase: ', '');
-            }
+            } catch (error) { loginError.textContent = error.message.replace('Firebase: ', ''); }
         }
         
         async function handleAuthState(user) {
@@ -717,11 +671,13 @@
                 searchInput.disabled = false;
                 searchInput.placeholder = "Search Name or Pokédex Nr.";
                 listenToCollection(user.uid);
-                searchLocalDatabase('Pikachu'); 
+                resultsContainer.innerHTML = '';
+                lastDisplayedCards = [];
+                showStatus('Search for a card to begin!');
             } else {
                 currentUser = null;
                 completionList = [];
-                updateProgress();
+                updateCollectionStats();
                 if (unsubscribeFromCollection) unsubscribeFromCollection();
                 loginModal.classList.remove('hidden');
                 userDisplay.textContent = 'LOGGED OUT';
@@ -733,6 +689,23 @@
                 lastDisplayedCards = [];
             }
         }
+        
+        function applyDarkMode(isDark) {
+            const sunIcon = `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>`;
+            const moonIcon = `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>`;
+            if (isDark) {
+                document.documentElement.classList.add('dark');
+                darkModeToggle.innerHTML = sunIcon;
+            } else {
+                document.documentElement.classList.remove('dark');
+                darkModeToggle.innerHTML = moonIcon;
+            }
+        }
+        function toggleDarkMode() {
+            const isDarkMode = document.documentElement.classList.contains('dark');
+            localStorage.setItem('darkMode', !isDarkMode);
+            applyDarkMode(!isDarkMode);
+        }
 
         // --- Event Listeners ---
         function setupEventListeners() {
@@ -743,49 +716,39 @@
                     searchLocalDatabase(searchInput.value.trim());
                 }
             });
-            document.addEventListener('click', e => {
-                if (!e.target.closest('#autocomplete-container')) autocompleteResults.classList.add('hidden');
-            });
+            document.addEventListener('click', e => { if (!e.target.closest('#autocomplete-container')) autocompleteResults.classList.add('hidden'); });
             closeModalButton.addEventListener('click', () => imageModal.classList.add('hidden'));
             document.addEventListener('keydown', e => e.key === 'Escape' && !imageModal.classList.contains('hidden') && imageModal.classList.add('hidden'));
             
-            showListBtn.addEventListener('click', () => {
-                if (!currentUser) {
-                    showToast("Please log in to manage a list.");
-                    return;
-                }
-                navigateTo('myList'); 
-            });
+            showListBtn.addEventListener('click', () => { if (currentUser) navigateTo('myList'); });
             backToSearchBtn.addEventListener('click', () => navigateTo('search')); 
 
-            gridViewBtn.addEventListener('click', () => setActiveView('grid'));
-            listViewBtn.addEventListener('click', () => setActiveView('list'));
-            
-            myListGridViewBtn.addEventListener('click', () => setMyListView('grid')); // NEW
-            myListListViewBtn.addEventListener('click', () => setMyListView('list')); // NEW
+            gridViewBtn.addEventListener('click', () => setActiveView('grid', 'search'));
+            listViewBtn.addEventListener('click', () => setActiveView('list', 'search'));
+            myListGridViewBtn.addEventListener('click', () => setActiveView('grid', 'myList'));
+            myListListViewBtn.addEventListener('click', () => setActiveView('list', 'myList'));
 
             logoutBtn.addEventListener('click', () => signOut(auth));
             loginForm.addEventListener('submit', handleAuthForm);
             toggleAuthMode.addEventListener('click', () => setAuthMode(!isRegistering));
+            darkModeToggle.addEventListener('click', toggleDarkMode);
             
-            myListSortControls.addEventListener('click', (e) => {
-                const target = e.target.closest('.sort-btn');
-                if(target){
-                    setMyListSort(target.dataset.field, target.dataset.direction);
-                }
-            });
             myListFilterControls.addEventListener('click', (e) => {
                 const target = e.target.closest('.filter-btn');
-                if(target){
-                    setMyListFilter(target.dataset.type, target.dataset.value);
-                }
+                if(target) setMyListFilter(target.dataset.type, target.dataset.value);
             });
         }
         
         // --- Initial Load ---
         function main() {
-            setActiveView('grid'); // Default view for search results
-            setMyListView('grid'); // Default view for My List page (NEW)
+            setActiveView('grid', 'search');
+            setActiveView('grid', 'myList');
+            createSortControls(searchSortControls, searchSort, () => displayCards(lastDisplayedCards));
+            createSortControls(myListSortControlsContainer, myListSort, renderCompletionList);
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const savedTheme = localStorage.getItem('darkMode');
+            applyDarkMode(savedTheme === 'true' || (savedTheme === null && prefersDark));
+            
             onAuthStateChanged(auth, handleAuthState); 
             setupEventListeners();
         }
@@ -793,256 +756,139 @@
         main();
     </script>
     <style>
-        html {
-            -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
-            image-rendering: -webkit-optimize-contrast; image-rendering: pixelated;
-        }
-        body { font-family: 'Press Start 2P', cursive; background-color: #e0e0e0; color: #212121; }
-        .game-box { background-color: white; border: 4px solid #212121; box-shadow: 6px 6px 0px #212121; }
-        .game-box-thin { border: 2px solid #212121; box-shadow: 2px 2px 0px #212121; } 
+        html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; image-rendering: -webkit-optimize-contrast; image-rendering: pixelated; }
+        body { font-family: 'Press Start 2P', cursive; background-color: #e0e0e0; color: #212121; transition: background-color 0.3s, color 0.3s; }
+        html.dark body { background-color: #121212; color: #e0e0e0; }
+        
+        .game-box { background-color: white; border: 4px solid #212121; box-shadow: 6px 6px 0px #212121; transition: background-color 0.3s, border-color 0.3s, box-shadow 0.3s; }
+        html.dark .game-box { background-color: #1e1e1e; border-color: #424242; box-shadow: none; }
+        .game-box-thin { border: 2px solid #212121; box-shadow: 2px 2px 0px #212121; }
+        html.dark .game-box-thin { border-color: #616161; box-shadow: none; }
 
         .game-btn { border: 3px solid #212121; box-shadow: 4px 4px 0px #212121; transition: all 0.1s ease-in-out; text-transform: uppercase; font-size: 14px; background-color: #fff; }
         .game-btn:hover { background-color: #f0f0f0; }
         .game-btn:active, .game-btn-active { box-shadow: 0px 0px 0px #212121; transform: translate(4px, 4px); background-color: #e0e0e0;}
+        html.dark .game-btn { background-color: #333; border-color: #666; color: #f5f5f5; box-shadow: none; }
+        html.dark .game-btn:hover { background-color: #444; }
+        html.dark .game-btn:active, html.dark .game-btn-active { transform: translateY(2px); background-color: #222; }
+        
         .game-btn:disabled { background-color: #bdbdbd; box-shadow: none; transform: none; cursor: not-allowed; opacity: 0.7; }
+        html.dark .game-btn:disabled { background-color: #424242; }
+
         .game-btn-primary { background-color: #2979ff; color: white; }
-        .game-btn-primary:hover:not(:disabled) { background-color: #2962ff; }
+        html.dark .game-btn-primary { background-color: #42a5f5; }
+        .game-btn-danger { background-color: #D32F2F; color: white; }
+        html.dark .game-btn-danger { background-color: #ef5350; }
         .game-btn-success { background-color: #00c853; color: white; }
-        .game-btn-success:hover:not(:disabled) { background-color: #00bfa5; }
-        .game-input { background-color: white; border: 3px solid #212121; font-size: 16px; padding: 12px; width: 100%; }
+        html.dark .game-btn-success { background-color: #66bb6a; }
+
+        .game-input { background-color: white; border: 3px solid #212121; font-size: 16px; padding: 12px; width: 100%; transition: background-color 0.3s, border-color 0.3s; }
+        html.dark .game-input { background-color: #2a2a2a; border-color: #616161; color: #f5f5f5; }
         .game-input:focus { outline: none; border-color: #2979ff; }
-        .progress-container { border: 3px solid #212121; background-color: #e0e0e0; padding: 4px; }
-        .progress-bar-inner { background-color: #2979ff; transition: width 0.5s ease-out; height: 16px; }
+        html.dark .game-input:focus { border-color: #42a5f5; }
+        
+        .sort-select { -webkit-appearance: none; -moz-appearance: none; appearance: none; background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e"); background-repeat: no-repeat; background-position: right 0.5rem center; background-size: 1.5em; padding-right: 2.5rem; }
+        html.dark .sort-select { background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23e0e0e0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e"); }
+
         #toast-container { position: fixed; bottom: 0; left: 0; right: 0; z-index: 1000; pointer-events: none; }
-        .toast { background-color: #212121; color: white; padding: 20px; border-top: 4px solid #9e9e9e; animation: slide-up 0.3s ease-out, slide-down 0.3s ease-in 2.7s forwards; font-size: 14px; text-align: center; }
+        .toast { background-color: #212121; color: white; padding: 20px; border-top: 4px solid #9e9e9e; animation: slide-up 0.3s ease-out, slide-down 0.3s ease-in 1.7s forwards; font-size: 14px; text-align: center; }
+        html.dark .toast { background-color: #f5f5f5; color: #212121; border-top-color: #616161; }
         @keyframes slide-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
         @keyframes slide-down { from { transform: translateY(0); } to { transform: translateY(100%); } }
         
-        .img-placeholder {
-            display: inline-block;
-            width: 100%;
-            aspect-ratio: 245 / 342;
-            background-color: #d1d5db;
-            border: 4px solid #212121;
-            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
+        .img-placeholder { display: inline-block; width: 100%; aspect-ratio: 245 / 342; background-color: #d1d5db; animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        html.dark .img-placeholder { background-color: #374151; }
         .img-placeholder.w-20 { width: 5rem; aspect-ratio: 245 / 342; height: auto; }
         @keyframes pulse { 50% { opacity: .5; } }
-        #autocomplete-container { position: relative; }
+        
         #autocomplete-results { position: absolute; top: 100%; left: 0; right: 0; z-index: 50; background-color: white; border: 3px solid #212121; margin-top: -3px; max-height: 200px; overflow-y: auto; }
+        html.dark #autocomplete-results { background-color: #2a2a2a; border-color: #616161; }
         .suggestion-item { padding: 10px 12px; cursor: pointer; border-bottom: 2px solid #e0e0e0; font-size: 14px; }
+        html.dark .suggestion-item { border-bottom-color: #424242; }
         .suggestion-item:last-child { border-bottom: none; }
         .suggestion-item:hover { background-color: #f0f0f0; }
+        html.dark .suggestion-item:hover { background-color: #424242; }
 
-        /* General Modal Styling */
-        #imageModal .modal-content-box {
-            background-color: white;
-            border: 4px solid #212121;
-            box-shadow: 6px 6px 0px #212121;
-            border-radius: 0.5rem; 
-            width: 90%; 
-            max-width: 90%;
-            max-height: 95vh; /* Ensured the content box itself has a max-height */
-            overflow-y: auto; /* Allow scrolling within the content box */
-        }
+        #imageModal .modal-content-box { background-color: white; border: 4px solid #212121; box-shadow: 6px 6px 0px #212121; width: 90%; max-width: 90%; max-height: 95vh; overflow-y: auto; }
+        html.dark #imageModal .modal-content-box { background-color: #1e1e1e; border-color: #424242; box-shadow: none; }
+        @media (min-width: 768px) { #imageModal .modal-content-box { max-width: 60rem; } }
+        @media (min-width: 1024px) { #imageModal .modal-content-box { max-width: 70rem; } }
 
-        /* Responsive Modal Widths */
-        @media (min-width: 640px) { /* sm breakpoint */
-            #imageModal .modal-content-box { max-width: 40rem; } 
-        }
-        @media (min-width: 768px) { /* md breakpoint */
-            #imageModal .modal-content-box { max-width: 60rem; } 
-        }
-        @media (min-width: 1024px) { /* lg breakpoint */
-            #imageModal .modal-content-box { max-width: 70rem; } 
-        }
-        @media (min-width: 1280px) { /* xl breakpoint */
-            #imageModal .modal-content-box { max-width: 80rem; } 
-        }
-
-        /* Custom Scrollbar for Details (Webkit browsers like Chrome/Safari) */
-        .custom-scrollbar::-webkit-scrollbar {
-            width: 8px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-            background: #f0f0f0; 
-            border-radius: 10px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-            background: #888; 
-            border-radius: 10px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-            background: #555; 
-        }
-
-        /* Specific Modal Detail Styles */
-        #modalDetailsContainer .detail-label { color: #212121; } 
-        #modalDetailsContainer .detail-value { color: #424242; } 
-        #modalDetailsContainer h2 { color: #D32F2F; } 
-        #modalDetailsContainer h3 { color: #1976D2; } 
-        #modalDetailsContainer .text-red-600 { color: #D32F2F; } 
-        #modalDetailsContainer .text-gray-900 { color: #212121; }
-        #modalDetailsContainer .text-gray-600 { color: #616161; }
+        .custom-scrollbar::-webkit-scrollbar { width: 12px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #e0e0e0; }
+        html.dark .custom-scrollbar::-webkit-scrollbar-track { background: #2a2a2a; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #212121; border: 2px solid #e0e0e0; }
+        html.dark .custom-scrollbar::-webkit-scrollbar-thumb { background: #616161; border-color: #2a2a2a; }
         
-        /* Small type/energy icons */
-        .type-icon {
-            display: inline-flex; 
-            align-items: center;
-            justify-content: center;
-            width: 0.8rem; 
-            height: 0.8rem;
-            border-radius: 50%; 
-            border: 1px solid #616161; 
-            vertical-align: middle;
-            margin-right: 0.2rem;
-            box-shadow: 1px 1px 0px #212121; 
-            padding: 1px; 
-        }
-        .type-icon-text {
-            font-size: 0.5rem; 
-            line-height: 1; 
-            color: white; 
-            text-align: center;
-            font-family: sans-serif; 
-            font-weight: bold;
-        }
-        /* MODAL CLOSE BUTTON STYLES (Fixed to be outside the content box, within the overlay) */
-        #closeModal {
-            position: absolute; 
-            top: 10px; /* Aligned from the top of the modal overlay (black background) */
-            right: 10px; /* Aligned from the right of the modal overlay */
-            width: 3rem; 
-            height: 3rem;
-            font-size: 1.5rem;
-            background-color: #D32F2F; 
-            border-radius: 0.5rem; 
-            box-shadow: 4px 4px 0px #212121; 
-            z-index: 60; /* Higher z-index to ensure it's on top of everything */
-            display: flex; /* Flexbox for centering X */
-            align-items: center;
-            justify-content: center;
-            cursor: pointer; /* Indicate it's clickable */
-        }
-        #closeModal:hover {
-            background-color: #C62828; 
-            transform: scale(1.05); 
-            box-shadow: 6px 6px 0px #212121;
-        }
-        #closeModal:active {
-            box-shadow: 0px 0px 0px #212121;
-            transform: translate(4px, 4px); 
-        }
-
+        #modalDetailsContainer .text-red-700 { color: #D32F2F; text-shadow: 2px 2px #000; } 
+        html.dark #modalDetailsContainer .text-red-500 { text-shadow: none; }
+        
+        .type-icon-text { font-size: 0.75rem; line-height: 1; color: white; text-align: center; font-family: sans-serif; font-weight: bold; text-shadow: 1px 1px #000; }
+        
+        #closeModal { position: absolute; top: 10px; right: 10px; width: 3rem; height: 3rem; font-size: 1.5rem; color: white; border: 3px solid #212121; z-index: 60; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+        html.dark #closeModal { border-color: #f5f5f5; }
     </style>
 </head>
 <body class="antialiased">
     <!-- Login Modal -->
-    <div id="loginModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-70">
+    <div id="loginModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-70 dark:bg-opacity-80">
         <form id="loginForm" class="game-box p-8 text-center w-full max-w-sm">
             <h2 id="loginTitle" class="text-2xl font-bold mb-4">PLAYER LOGIN</h2>
             <p id="loginError" class="text-red-500 text-xs mb-4 h-4"></p>
             <input type="email" id="emailInput" class="game-input text-center mb-4" placeholder="Enter your email" required>
             <input type="password" id="passwordInput" class="game-input text-center mb-6" placeholder="Enter your password" required>
             <button id="loginSubmitBtn" type="submit" class="w-full game-btn game-btn-primary py-3">> LOGIN</button>
-            <p id="toggleAuthMode" class="text-xs text-gray-500 mt-6 cursor-pointer">Need an account? <span class="underline">Register</span></p>
+            <p id="toggleAuthMode" class="text-xs text-gray-500 dark:text-gray-400 mt-6 cursor-pointer">Need an account? <span class="underline">Register</span></p>
         </form>
     </div>
 
     <div class="max-w-7xl mx-auto p-4 md:p-8 relative z-10">
+        <header class="text-center mb-10 p-4 relative">
+            <h1 class="text-3xl md:text-4xl font-black mb-2 tracking-tighter">POKéMON TCG TRACKER</h1>
+            <button id="darkModeToggle" class="absolute top-0 right-0 game-btn p-3"></button>
+        </header>
+
         <!-- Main Search View -->
         <div id="searchView" class="">
-            <header class="text-center mb-10 p-4"><h1 class="text-3xl md:text-4xl font-black mb-2 tracking-tighter">POKéMON TCG TRACKER</h1></header>
-
             <div class="game-box p-4 md:p-6">
-                <div class="mb-6 pb-6 border-b-4 border-dashed border-gray-300">
-                    <div class="flex flex-col sm:flex-row justify-between items-center gap-6">
-                        <div class="w-full sm:w-2/3">
-                            <div class="flex justify-between items-center mb-2 text-xs">
-                                <span class="font-semibold">PROGRESS</span>
-                                <span id="progressText" class="font-bold">0/1025</span>
-                            </div>
-                            <div class="progress-container"><div id="progressBar" class="progress-bar-inner" style="width: 0%"></div></div>
+                <div class="mb-6 pb-6 border-b-4 border-dashed border-gray-300 dark:border-gray-700">
+                    <div class="flex flex-col md:flex-row justify-between items-center gap-4">
+                        <div id="collectionStatsContainer" class="w-full flex-grow">
+                            <div class="text-center text-gray-500 dark:text-gray-400">Loading stats...</div>
                         </div>
-                        <button id="showListBtn" class="w-full sm:w-auto game-btn py-3 px-6 text-sm" disabled>> MY LIST</button>
+                        <button id="showListBtn" class="w-full md:w-auto game-btn py-3 px-6 text-sm flex-shrink-0" disabled>> MY LIST</button>
                     </div>
                 </div>
 
-                <div class="max-w-xl mx-auto mb-4 flex flex-col sm:flex-row gap-4 items-center">
+                <div class="max-w-2xl mx-auto mb-4 flex flex-col md:flex-row gap-4 items-center">
                     <div id="autocomplete-container" class="flex-grow w-full">
                         <input type="text" id="searchInput" class="game-input text-center w-full" placeholder="Loading...">
                         <div id="autocomplete-results" class="hidden"></div>
                     </div>
-                    <div class="flex gap-2">
-                        <button id="gridViewBtn" title="Grid View" class="game-btn p-3">
-                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
-                        </button>
-                        <button id="listViewBtn" title="List View" class="game-btn p-3">
-                           <svg class="w-5 h-5" fill="currentColor" viewbox="0 0 20 20"><path fill-rule="evenodd" d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10zm0 5.25a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75z" clip-rule="evenodd"></path></svg>
-                        </button>
+                    <div class="flex gap-2 items-center">
+                        <div id="searchSortControls" class="flex items-center"></div>
+                        <button id="gridViewBtn" title="Grid View" class="game-btn p-3"><svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg></button>
+                        <button id="listViewBtn" title="List View" class="game-btn p-3"><svg class="w-5 h-5" fill="currentColor" viewbox="0 0 20 20"><path fill-rule="evenodd" d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10zm0 5.25a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75z" clip-rule="evenodd"></path></svg></button>
                     </div>
                 </div>
-                <div id="statusDisplay" class="text-center text-gray-500 text-xs py-2"></div>
-                <main id="results" class="gap-6"></main>
+                <div id="statusDisplay" class="text-center text-gray-500 dark:text-gray-400 text-xs py-2"></div>
+                <main id="results" class="gap-4"></main>
             </div>
         </div>
 
-        <!-- My List Full Page (NEW) -->
         <div id="myListFullPage" class="hidden">
-            <header class="text-center mb-6">
-                <div class="flex items-center justify-between">
-                    <button id="backToSearchBtn" class="game-btn py-2 px-4 text-sm">< BACK</button>
-                    <h1 class="text-3xl md:text-4xl font-black tracking-tighter">MY LIST</h1>
-                    <div class="w-20"></div> <!-- Placeholder for alignment -->
-                </div>
-            </header>
-
+            <header class="text-center mb-6"><div class="flex items-center justify-between"><button id="backToSearchBtn" class="game-btn py-2 px-4 text-sm">< BACK</button><h1 class="text-3xl md:text-4xl font-black tracking-tighter">MY LIST</h1><div class="w-20"></div></div></header>
             <div class="game-box p-4 md:p-6">
-                <!-- My List Sorting Controls -->
-                <div id="myListSortControls" class="grid grid-cols-2 lg:grid-cols-3 gap-2 text-xs border-y-2 border-black py-2 mb-4">
-                    <div class="flex items-center gap-2">
-                        <span class="font-bold">#</span>
-                        <button data-field="pokedex" data-direction="asc" title="Sort by Number Ascending" class="sort-btn game-btn p-1 border-2">▲</button>
-                        <button data-field="pokedex" data-direction="desc" title="Sort by Number Descending" class="sort-btn game-btn p-1 border-2">▼</button>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <span class="font-bold">NAME</span>
-                        <button data-field="name" data-direction="asc" title="Sort by Name Ascending" class="sort-btn game-btn p-1 border-2">A-Z</button>
-                        <button data-field="name" data-direction="desc" title="Sort by Name Descending" class="sort-btn game-btn p-1 border-2">Z-A</button>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <span class="font-bold">HP</span>
-                        <button data-field="hp" data-direction="asc" title="Sort by HP Ascending" class="sort-btn game-btn p-1 border-2">▲</button>
-                        <button data-field="hp" data-direction="desc" title="Sort by HP Descending" class="sort-btn game-btn p-1 border-2">▼</button>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <span class="font-bold">RELEASE</span>
-                        <button data-field="releaseDate" data-direction="asc" title="Sort by Release Date Ascending" class="sort-btn game-btn p-1 border-2">OLD</button>
-                        <button data-field="releaseDate" data-direction="desc" title="Sort by Release Date Descending" class="sort-btn game-btn p-1 border-2">NEW</button>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <span class="font-bold">RARITY</span>
-                        <button data-field="rarity" data-direction="asc" title="Sort by Rarity Ascending" class="sort-btn game-btn p-1 border-2">A-Z</button>
-                        <button data-field="rarity" data-direction="desc" title="Sort by Rarity Descending" class="sort-btn game-btn p-1 border-2">Z-A</button>
+                <div class="flex flex-col md:flex-row justify-between items-center gap-4 mb-4 border-b-2 border-dashed border-gray-300 dark:border-gray-700 pb-4">
+                    <div id="myListSortControls" class="flex items-center"></div>
+                    <div class="flex justify-end gap-2">
+                        <button id="myListGridViewBtn" title="Grid View" class="game-btn p-3"><svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg></button>
+                        <button id="myListListViewBtn" title="List View" class="game-btn p-3"><svg class="w-5 h-5" fill="currentColor" viewbox="0 0 20 20"><path fill-rule="evenodd" d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10zm0 5.25a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75z" clip-rule="evenodd"></path></svg></button>
                     </div>
                 </div>
-                <!-- My List Filter Controls -->
                 <div id="myListFilterControls" class="text-xs mb-4">
-                    <div id="myListLetterFilters" class="flex flex-wrap gap-1 justify-center mb-2">
-                        <!-- Letter filters will be dynamically generated here -->
-                    </div>
-                    <div id="myListRangeFilters" class="flex flex-wrap gap-1 justify-center">
-                        <!-- Range filters will be dynamically generated here -->
-                    </div>
-                </div>
-                <!-- My List View Toggle Buttons -->
-                <div class="flex justify-end gap-2 mb-4">
-                    <button id="myListGridViewBtn" title="Grid View" class="game-btn p-3">
-                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
-                    </button>
-                    <button id="myListListViewBtn" title="List View" class="game-btn p-3">
-                        <svg class="w-5 h-5" fill="currentColor" viewbox="0 0 20 20"><path fill-rule="evenodd" d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10zm0 5.25a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75z" clip-rule="evenodd"></path></svg>
-                    </button>
+                    <div id="myListLetterFilters" class="flex flex-wrap gap-1 justify-center mb-2"></div>
+                    <div id="myListRangeFilters" class="flex flex-wrap gap-1 justify-center"></div>
                 </div>
                 <div id="myListFullPageContainer" class="flex-grow overflow-y-auto pr-2 space-y-4 custom-scrollbar"></div>
             </div>
@@ -1050,28 +896,19 @@
 
         <footer class="text-center mt-4">
             <div class="flex items-center justify-center gap-4">
-                   <p id="userDisplay" class="text-gray-500 text-xs"></p>
+                   <p id="userDisplay" class="text-gray-500 dark:text-gray-400 text-xs"></p>
                    <button id="logoutBtn" class="hidden game-btn text-xs py-1 px-2 border-2 shadow-sm active:translate-y-0.5 active:shadow-none">> LOGOUT</button>
             </div>
         </footer>
     </div>
     
-    <!-- MODAL - Stays fixed and on top -->
-    <div id="imageModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-black bg-opacity-70">
-        <div class="relative w-11/12 sm:max-w-md md:max-w-3xl lg:max-w-4xl xl:max-w-6xl modal-content-box p-6 flex flex-col md:flex-row gap-4 max-h-[95vh] rounded-lg">
-            <!-- Card Image Column -->
-            <div class="flex-shrink-0 flex justify-center items-start w-full md:w-1/2">
-                <img id="modalImage" src="" alt="Pokémon Card Large View" class="w-full h-auto object-contain max-h-[70vh] border-2 border-black rounded-lg shadow-lg">
+    <div id="imageModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-black bg-opacity-70 dark:bg-opacity-80">
+        <div class="relative w-11/12 modal-content-box p-4 sm:p-6 flex flex-col md:flex-row gap-4 max-h-[95vh]">
+            <div class="flex-shrink-0 flex justify-center items-start md:w-5/12 lg:w-4/12">
+                <img id="modalImage" src="" alt="Pokémon Card Large View" class="w-full h-auto object-contain max-h-[85vh] rounded-lg">
             </div>
-
-            <!-- Card Details Column -->
-            <div id="modalDetailsContainer" class="flex-grow text-sm w-full md:w-1/2 p-2 overflow-y-auto custom-scrollbar">
-                <!-- Details will be dynamically inserted here -->
-                <p>Click on a card to see details...</p> 
-            </div>
-
-            <!-- Close Button (Relocated and Restyled) -->
-            <button id="closeModal" class="absolute game-btn text-white font-mono flex items-center justify-center rounded-lg">[X]</button>
+            <div id="modalDetailsContainer" class="flex-grow md:w-7/12 lg:w-8/12 p-2 overflow-y-auto custom-scrollbar"></div>
+            <button id="closeModal" class="absolute font-mono game-btn game-btn-danger">[X]</button>
         </div>
     </div>
 
