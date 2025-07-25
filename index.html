@@ -45,6 +45,8 @@
         const closeListBtn = document.getElementById('closeListBtn');
         const sortControls = document.getElementById('sortControls');
         const filterControls = document.getElementById('filterControls');
+        const letterFilters = document.getElementById('letter-filters');
+        const rangeFilters = document.getElementById('range-filters');
 
         // --- State and Config ---
         const TOTAL_POKEMON_SPECIES = 1025; 
@@ -199,6 +201,30 @@
 
         function renderCompletionList() {
             myListContainer.innerHTML = '';
+            
+            // --- NEW: DYNAMIC FILTER BUTTONS ---
+            const createButton = (parent, type, value, text, isTextSmall = false) => {
+                const button = document.createElement('button');
+                button.dataset.type = type;
+                button.dataset.value = value;
+                button.className = `filter-btn game-btn p-1 border-2 ${isTextSmall ? 'text-[8px]' : ''}`;
+                button.textContent = text;
+                parent.appendChild(button);
+            };
+            
+            letterFilters.innerHTML = '';
+            rangeFilters.innerHTML = '';
+
+            createButton(letterFilters, 'all', 'all', 'ALL');
+
+            if (completionList.length > 0) {
+                const availableLetters = [...new Set(completionList.map(c => c.name[0].toUpperCase()))].sort();
+                availableLetters.forEach(letter => createButton(letterFilters, 'letter', letter, letter));
+
+                const getRange = num => `${Math.floor(num / 50) * 50 + 1}-${Math.floor(num / 50) * 50 + 50}`;
+                const availableRanges = [...new Set(completionList.map(c => getRange(c.pokedex)))].sort((a,b) => parseInt(a) - parseInt(b));
+                availableRanges.forEach(range => createButton(rangeFilters, 'range', range, range, true));
+            }
             
             // Update active state on sort/filter buttons
             document.querySelectorAll('#sortControls button, #filterControls button').forEach(btn => btn.classList.remove('game-btn-active'));
@@ -473,15 +499,17 @@
             loginForm.addEventListener('submit', handleAuthForm);
             toggleAuthMode.addEventListener('click', () => setAuthMode(!isRegistering));
             
-            // Sort and Filter listeners
+            // Sort and Filter listeners using event delegation
             sortControls.addEventListener('click', (e) => {
-                if(e.target.classList.contains('sort-btn')){
-                    setSort(e.target.dataset.field, e.target.dataset.direction);
+                const target = e.target.closest('.sort-btn');
+                if(target){
+                    setSort(target.dataset.field, target.dataset.direction);
                 }
             });
             filterControls.addEventListener('click', (e) => {
-                if(e.target.classList.contains('filter-btn')){
-                    setFilter(e.target.dataset.type, e.target.dataset.value);
+                const target = e.target.closest('.filter-btn');
+                if(target){
+                    setFilter(target.dataset.type, target.dataset.value);
                 }
             });
         }
@@ -623,21 +651,11 @@
                 </div>
             </div>
              <div id="filterControls" class="text-xs mb-4">
-                <div class="flex flex-wrap gap-1 justify-center mb-2">
-                    <button data-type="all" data-value="all" class="filter-btn game-btn p-1 border-2">ALL</button>
-                    <script>
-                        'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').forEach(letter => {
-                            document.write(`<button data-type="letter" data-value="${letter}" class="filter-btn game-btn p-1 border-2">${letter}</button>`);
-                        });
-                    </script>
+                <div id="letter-filters" class="flex flex-wrap gap-1 justify-center mb-2">
+                    <!-- Letter filters will be dynamically generated here -->
                 </div>
-                <div class="flex flex-wrap gap-1 justify-center">
-                     <script>
-                        for(let i = 0; i < 1001; i+=50) {
-                            const range = `${i+1}-${i+50}`;
-                            document.write(`<button data-type="range" data-value="${range}" class="filter-btn game-btn p-1 border-2 text-[8px]">${range}</button>`);
-                        }
-                    </script>
+                <div id="range-filters" class="flex flex-wrap gap-1 justify-center">
+                    <!-- Range filters will be dynamically generated here -->
                 </div>
             </div>
         </div>
