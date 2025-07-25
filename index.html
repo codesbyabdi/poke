@@ -20,14 +20,11 @@
         const resultsContainer = document.getElementById('results');
         const imageModal = document.getElementById('imageModal');
         const modalImage = document.getElementById('modalImage');
-        const modalDetailsContainer = document.getElementById('modalDetailsContainer'); // NEW: Container for card details
+        const modalDetailsContainer = document.getElementById('modalDetailsContainer');
         const closeModalButton = document.getElementById('closeModal');
         const progressText = document.getElementById('progressText');
         const progressBar = document.getElementById('progressBar');
         const showListBtn = document.getElementById('showListBtn');
-        const myListPanel = document.getElementById('myListPanel');
-        const panelOverlay = document.getElementById('panel-overlay');
-        const myListContainer = document.getElementById('myListContainer');
         const toastContainer = document.getElementById('toast-container');
         const userDisplay = document.getElementById('userDisplay');
         const logoutBtn = document.getElementById('logoutBtn');
@@ -43,23 +40,33 @@
         const toggleAuthMode = document.getElementById('toggleAuthMode');
         const autocompleteResults = document.getElementById('autocomplete-results');
         const statusDisplay = document.getElementById('statusDisplay');
-        const closeListBtn = document.getElementById('closeListBtn');
-        const sortControls = document.getElementById('sortControls');
-        const filterControls = document.getElementById('filterControls');
-        const letterFilters = document.getElementById('letter-filters');
-        const rangeFilters = document.getElementById('range-filters');
+        
+        // My List Page DOM Elements
+        const searchView = document.getElementById('searchView');
+        const myListFullPage = document.getElementById('myListFullPage');
+        const myListFullPageContainer = document.getElementById('myListFullPageContainer');
+        const backToSearchBtn = document.getElementById('backToSearchBtn');
+        const myListSortControls = document.getElementById('myListSortControls');
+        const myListFilterControls = document.getElementById('myListFilterControls');
+        const myListLetterFilters = document.getElementById('myListLetterFilters');
+        const myListRangeFilters = document.getElementById('myListRangeFilters');
+        const myListGridViewBtn = document.getElementById('myListGridViewBtn'); // NEW
+        const myListListViewBtn = document.getElementById('myListListViewBtn'); // NEW
+
 
         // --- State and Config ---
         const TOTAL_POKEMON_SPECIES = 1025; 
         let completionList = [];
         let currentUser = null;
         let unsubscribeFromCollection = null;
-        let currentView = 'grid';
+        let currentView = 'grid'; // For search results
+        let myListView = 'grid'; // For My List page (NEW)
         let lastDisplayedCards = [];
         let localCardDatabase = {}; 
         let isRegistering = false;
-        let currentSort = { field: 'pokedex', direction: 'asc' };
-        let currentFilter = { type: 'all', value: null };
+        let currentSort = { field: 'pokedex', direction: 'asc' }; // For My List page sorting
+        let currentFilter = { type: 'all', value: null }; // For My List page filtering
+        let currentPage = 'search'; 
 
         // --- Firebase Initialization ---
         const firebaseConfig = {
@@ -75,27 +82,54 @@
         const db = getFirestore(app);
         const appId = firebaseConfig.appId;
 
+        // --- Helper for Type/Energy Icons ---
+        const typeColors = {
+            Colorless: '#A8A77A', // Normal-like
+            Fire: '#EE8130',
+            Water: '#6390F0',
+            Grass: '#7AC74C',
+            Lightning: '#F7D02C', // Electric-like
+            Fighting: '#C22E28', // Fighting/Rock/Ground
+            Psychic: '#F95587',
+            Darkness: '#705746', // Dark
+            Metal: '#B7B7CE', // Steel
+            Dragon: '#6F35FC', // Dragon (often purple/blue)
+            Fairy: '#D685AD', // Fairy (often pink) - Note: Pokémon TCG has removed Fairy type
+            // Add more as needed based on card data
+        };
+
+        function getTypeIcon(type, size = 'w-4 h-4') {
+            const color = typeColors[type] || '#ccc'; // Default to light gray if type not found
+            return `<span class="inline-flex items-center justify-center ${size} rounded-full border border-gray-600 align-middle mr-1 game-box-thin" style="background-color: ${color};">
+                        <span class="type-icon-text leading-none">${type.substring(0,1).toUpperCase()}</span>
+                    </span>`; // Uppercase for type icon text
+        }
+
+        function formatCosts(costs) {
+            if (!costs || costs.length === 0) return '';
+            return costs.map(cost => getTypeIcon(cost, 'w-5 h-5')).join(''); // Larger icons for costs
+        }
+
         // --- UI Functions ---
         function showToast(message) {
             const toast = document.createElement('div');
             toast.className = 'toast';
             toast.innerHTML = message;
-            toastContainer.innerHTML = ''; 
-            toastContainer.appendChild(toast);
+            // Removed clearing toastContainer, let multiple toasts stack or be replaced by CSS
+            toastContainer.innerHTML = ''; // Keep this to ensure only one toast visible at a time
+            toastContainer.appendChild(toast); 
         }
 
-        function toggleListPanel(open) {
-            if (open) {
-                if (!currentUser) {
-                    showToast("Please log in to manage a list.");
-                    return;
-                }
-                renderCompletionList();
-                panelOverlay.classList.remove('hidden');
-                myListPanel.classList.add('open');
-            } else {
-                panelOverlay.classList.add('hidden');
-                myListPanel.classList.remove('open');
+        function navigateTo(page) {
+            currentPage = page;
+            if (page === 'myList') {
+                searchView.classList.add('hidden');
+                myListFullPage.classList.remove('hidden');
+                renderCompletionList(); // Render list when navigating to it
+            } else { // 'search'
+                searchView.classList.remove('hidden');
+                myListFullPage.classList.add('hidden');
+                displayCards(lastDisplayedCards); // Re-display last search results if returning
             }
         }
         
@@ -108,10 +142,17 @@
         }
 
         function setActiveView(view) {
-            currentView = view;
+            currentView = view; // For search results
             gridViewBtn.classList.toggle('game-btn-active', view === 'grid');
             listViewBtn.classList.toggle('game-btn-active', view === 'list');
             displayCards(lastDisplayedCards);
+        }
+
+        function setMyListView(view) { // NEW: For My List page view toggle
+            myListView = view;
+            myListGridViewBtn.classList.toggle('game-btn-active', view === 'grid');
+            myListListViewBtn.classList.toggle('game-btn-active', view === 'list');
+            renderCompletionList(); // Re-render My List with new view
         }
         
         function showStatus(message, isError = false) {
@@ -142,8 +183,8 @@
             unsubscribeFromCollection = onSnapshot(userDocRef, (docSnap) => {
                 completionList = docSnap.exists() ? docSnap.data().list || [] : [];
                 updateProgress();
-                if (myListPanel.classList.contains('open')) renderCompletionList();
-                displayCards(lastDisplayedCards);
+                if (currentPage === 'myList') renderCompletionList(); 
+                displayCards(lastDisplayedCards); // Update collection status on search results
             });
         }
 
@@ -157,11 +198,20 @@
             }
 
             if (!completionList.some(item => item.id === card.id)) {
+                // Ensure all relevant data points for My List display are stored
                 const newEntry = {
                     id: card.id,
                     pokedex: pokedexNumber,
                     name: card.name,
-                    image: `https://images.pokemontcg.io/${card.set.id}/${card.number}.png` 
+                    image: `https://images.pokemontcg.io/${card.set.id}/${card.number}.png`, // Small image for list
+                    set: { id: card.set.id, name: card.set.name, releaseDate: card.set.releaseDate},
+                    hp: card.hp,
+                    types: card.types,
+                    rarity: card.rarity,
+                    // Store other data needed for sorting on list page
+                    artist: card.artist, 
+                    supertype: card.supertype,
+                    subtype: card.subtype,
                 };
                 completionList.push(newEntry);
                 await saveCollectionToFirestore();
@@ -182,7 +232,7 @@
         function updateCardButton(card, isCollected, button) {
             button.disabled = isCollected;
             button.className = 'w-full mt-2 game-btn py-2 px-2 text-xs card-btn';
-            if (currentView === 'list') {
+            if (currentView === 'list') { // This class check is for search results, not My List
                 button.classList.add('sm:w-auto', 'sm:mt-0');
             }
             if (isCollected) {
@@ -195,18 +245,19 @@
         }
 
         // --- "My List" Sorting and Filtering ---
-        function setSort(field, direction) {
+        function setMyListSort(field, direction) { // Renamed to avoid conflict with general setSort
             currentSort = { field, direction };
-            renderCompletionList();
+            renderCompletionList(); 
         }
         
-        function setFilter(type, value) {
+        function setMyListFilter(type, value) { // Renamed to avoid conflict with general setFilter
             currentFilter = { type, value };
-            renderCompletionList();
+            renderCompletionList(); 
         }
 
         function renderCompletionList() {
-            myListContainer.innerHTML = '';
+            const container = myListFullPageContainer;
+            container.innerHTML = '';
             
             const createButton = (parent, type, value, text, isTextSmall = false) => {
                 const button = document.createElement('button');
@@ -217,26 +268,31 @@
                 parent.appendChild(button);
             };
             
-            letterFilters.innerHTML = '';
-            rangeFilters.innerHTML = '';
+            myListLetterFilters.innerHTML = ''; 
+            myListRangeFilters.innerHTML = '';
 
-            createButton(letterFilters, 'all', 'all', 'ALL');
+            createButton(myListLetterFilters, 'all', 'all', 'ALL');
 
             if (completionList.length > 0) {
                 const availableLetters = [...new Set(completionList.map(c => c.name[0].toUpperCase()))].sort();
-                availableLetters.forEach(letter => createButton(letterFilters, 'letter', letter, letter));
+                availableLetters.forEach(letter => createButton(myListLetterFilters, 'letter', letter, letter));
 
                 const getRange = num => `${Math.floor(num / 50) * 50 + 1}-${Math.floor(num / 50) * 50 + 50}`;
                 const availableRanges = [...new Set(completionList.map(c => getRange(c.pokedex)))].sort((a,b) => parseInt(a) - parseInt(b));
-                availableRanges.forEach(range => createButton(rangeFilters, 'range', range, range, true));
+                availableRanges.forEach(range => createButton(myListRangeFilters, 'range', range, range, true));
             }
             
-            document.querySelectorAll('#sortControls button, #filterControls button').forEach(btn => btn.classList.remove('game-btn-active'));
-            const activeSortBtn = document.querySelector(`.sort-btn[data-field='${currentSort.field}'][data-direction='${currentSort.direction}']`);
+            // Update active state on sort/filter buttons
+            document.querySelectorAll('#myListSortControls button, #myListFilterControls button').forEach(btn => btn.classList.remove('game-btn-active'));
+            const activeSortBtn = document.querySelector(`#myListSortControls .sort-btn[data-field='${currentSort.field}'][data-direction='${currentSort.direction}']`);
             if(activeSortBtn) activeSortBtn.classList.add('game-btn-active');
             
-            const activeFilterBtn = document.querySelector(`.filter-btn[data-type='${currentFilter.type}'][data-value='${currentFilter.value}']`);
+            const activeFilterBtn = document.querySelector(`#myListFilterControls .filter-btn[data-type='${currentFilter.type}'][data-value='${currentFilter.value}']`);
             if(activeFilterBtn) activeFilterBtn.classList.add('game-btn-active');
+
+            // Apply view active state
+            myListGridViewBtn.classList.toggle('game-btn-active', myListView === 'grid');
+            myListListViewBtn.classList.toggle('game-btn-active', myListView === 'list');
 
             let filteredList = completionList;
             if(currentFilter.type === 'letter'){
@@ -247,45 +303,84 @@
             }
 
             const sortedList = [...filteredList].sort((a, b) => {
-                if (currentSort.field === 'pokedex') {
-                    return currentSort.direction === 'asc' ? a.pokedex - b.pokedex : b.pokedex - a.pokedex;
+                let valA, valB;
+                switch (currentSort.field) {
+                    case 'pokedex':
+                        valA = a.pokedex;
+                        valB = b.pokedex;
+                        break;
+                    case 'name':
+                        valA = a.name;
+                        valB = b.name;
+                        break;
+                    case 'hp': // NEW SORT
+                        valA = parseInt(a.hp) || 0;
+                        valB = parseInt(b.hp) || 0;
+                        break;
+                    case 'releaseDate': // NEW SORT
+                        valA = new Date(a.set?.releaseDate || '1900/01/01'); // Default to old date if missing
+                        valB = new Date(b.set?.releaseDate || '1900/01/01');
+                        break;
+                    case 'rarity': // NEW SORT
+                        valA = a.rarity || '';
+                        valB = b.rarity || '';
+                        break;
+                    default:
+                        return 0;
                 }
-                if (currentSort.field === 'name') {
-                    return currentSort.direction === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
-                }
+
+                if (valA < valB) return currentSort.direction === 'asc' ? -1 : 1;
+                if (valA > valB) return currentSort.direction === 'asc' ? 1 : -1;
                 return 0;
             });
             
             if (sortedList.length === 0) {
-                myListContainer.innerHTML = `<div class="text-center p-4 text-gray-500">No cards match the filter...</div>`;
+                container.innerHTML = `<div class="text-center p-4 text-gray-500">No cards match the filter...</div>`;
                 return;
             }
 
-            sortedList.forEach(item => {
-                const listItem = document.createElement('div');
-                listItem.className = 'flex items-center justify-between p-2 bg-white border-2 border-black';
-                listItem.innerHTML = `
-                    <div class="flex items-center gap-4">
-                        <img src="${item.image}" alt="${item.name}" class="w-10 h-14 object-cover border-2 border-black">
-                        <div>
-                            <p class="font-bold text-sm">${item.name}</p>
-                            <p class="pokedex-link text-xs text-gray-500 cursor-pointer hover:underline">#${String(item.pokedex).padStart(3, '0')}</p>
-                        </div>
-                    </div>
-                    <button class="remove-btn text-red-500 hover:text-red-700 text-2xl">[X]</button>`;
-                
-                listItem.querySelector('.remove-btn').onclick = () => removeFromList(item.id);
-                listItem.querySelector('.pokedex-link').onclick = () => {
-                    toggleListPanel(false);
-                    searchInput.value = item.pokedex;
-                    searchLocalDatabase(String(item.pokedex));
-                };
-
-                myListContainer.appendChild(listItem);
-            });
+            // Render based on myListView
+            if (myListView === 'grid') {
+                container.className = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6 custom-scrollbar'; // Apply grid classes
+                sortedList.forEach(card => container.appendChild(createCardElement(card, displayCardAsGridTemplate(card)))); // Use template from helper function
+            } else { // list view
+                container.className = 'space-y-4 custom-scrollbar'; // Apply list classes
+                sortedList.forEach(card => container.appendChild(createCardElement(card, displayCardAsListTemplate(card)))); // Use template from helper function
+            }
         }
-        
-        // --- Database Sync (Modified for single compiled JSON) ---
+
+        // Helper function for grid view template (used by both search and my list)
+        function displayCardAsGridTemplate(card) {
+            return `<div class="text-center">
+                <div class="img-placeholder">
+                    <img alt="${card.name}" class="card-image w-full border-4 border-black cursor-pointer opacity-0" loading="lazy">
+                </div>
+                <div class="mt-2 text-xs">
+                    <p class="font-bold truncate">${card.name}</p>
+                    <div class="card-details-info text-gray-700 text-[10px] mt-1 mb-1"></div>
+                </div>
+                <button data-card-id="${card.id}" class="card-btn"></button>
+            </div>`;
+        }
+
+        // Helper function for list view template (used by both search and my list)
+        function displayCardAsListTemplate(card) {
+            return `<div class="game-box p-3 flex flex-col sm:flex-row items-center gap-4">
+                <div class="img-placeholder w-20 h-28 flex-shrink-0">
+                    <img alt="${card.name}" class="card-image w-20 h-28 object-cover border-2 border-black cursor-pointer opacity-0" loading="lazy">
+                </div>
+                <div class="flex-grow text-center sm:text-left">
+                    <p class="font-bold text-base">${card.name}</p>
+                    <div class="card-details-info text-gray-700 text-xs mt-1 mb-1"></div>
+                    <p class="text-xs text-gray-500">#${String(card.nationalPokedexNumbers?.[0] || 'N/A').padStart(3, '0')}</p>
+                    ${card.rarity ? `<p class="text-xs text-gray-500 capitalize">Rarity: ${card.rarity.toLowerCase()}</p>` : ''}
+                </div>
+                <button data-card-id="${card.id}" class="card-btn"></button>
+            </div>`;
+        }
+
+
+        // --- Database Sync ---
         async function syncLocalDatabase() {
             const storedDb = localStorage.getItem('pokemon-card-db');
             const dataUrl = 'https://raw.githubusercontent.com/codesbyabdi/poke/main/pokemon-tcg-db.json'; 
@@ -388,10 +483,9 @@
                 const pokedexA = a.nationalPokedexNumbers?.[0] || Infinity;
                 const pokedexB = b.nationalPokedexNumbers?.[0] || Infinity;
 
-                if (pokedexA !== pokedexB) {
-                    return pokedexA - pokedexB;
-                }
-                return a.name.localeCompare(b.name);
+                if (pokedexA < pokedexB) return -1;
+                if (pokedexA > pokedexB) return 1;
+                return a.name.localeCompare(b.name); // Secondary sort by name
             });
 
             lastDisplayedCards = results;
@@ -422,12 +516,13 @@
         function displayCards(cards) {
             resultsContainer.innerHTML = '';
             if (cards.length === 0) return;
+            // Use existing currentView for search results
             if (currentView === 'grid') {
                 resultsContainer.className = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6';
-                cards.forEach(displayCardAsGrid);
-            } else {
+                cards.forEach(card => resultsContainer.appendChild(createCardElement(card, displayCardAsGridTemplate(card))));
+            } else { // List view
                 resultsContainer.className = 'space-y-4';
-                cards.forEach(displayCardAsList);
+                cards.forEach(card => resultsContainer.appendChild(createCardElement(card, displayCardAsListTemplate(card))));
             }
         }
         
@@ -438,35 +533,40 @@
             modalDetailsContainer.innerHTML = ''; // Clear previous details
 
             // Helper for detail rows
-            const addDetailRow = (label, value) => {
+            const addDetailRow = (label, value, valueClass = '') => {
                 if (value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0)) return '';
                 return `
                     <div class="flex items-center gap-2 mb-1">
                         <span class="font-bold text-gray-800 detail-label">${label}:</span>
-                        <span class="text-gray-700 detail-value">${value}</span>
+                        <span class="text-gray-700 detail-value ${valueClass}">${value}</span>
                     </div>
                 `;
             };
 
-            // Helper for ability/attack blocks
-            const addSection = (title, contentHtml) => {
+            // Helper for ability/attack/stats blocks with game-box styling
+            const addThemedSection = (title, contentHtml) => {
                 if (!contentHtml.trim()) return '';
                 return `
-                    <div class="mb-4 pt-2 border-t border-gray-300">
-                        <h3 class="text-md font-bold mb-2 uppercase text-blue-800">${title}</h3>
+                    <div class="game-box p-3 mb-4">
+                        <h3 class="text-md font-bold mb-2 uppercase text-blue-800 border-b-2 border-gray-300 pb-1">${title}</h3>
                         ${contentHtml}
                     </div>
                 `;
             };
 
+            // Main Header
             let detailsHtml = `
-                <h2 class="text-2xl font-black mb-3 text-red-700 uppercase">${card.name}</h2>
-                <div class="text-lg font-bold mb-2">
-                    ${card.nationalPokedexNumbers ? `#${String(card.nationalPokedexNumbers[0]).padStart(3, '0')} ` : ''}
-                    ${card.supertype || ''} ${card.subtype ? `— ${card.subtype}` : ''}
+                <div class="text-center md:text-left mb-4">
+                    <h2 class="text-3xl font-black mb-1 text-red-700 uppercase leading-none">${card.name}</h2>
+                    <p class="text-xl font-bold text-gray-800 leading-none">
+                        ${card.hp ? `<span class="text-red-600">HP ${card.hp}</span> ` : ''}
+                        ${card.types && card.types.length > 0 ? card.types.map(type => getTypeIcon(type)).join('') : ''}
+                    </p>
+                    <p class="text-sm text-gray-600 mt-1">
+                        #${String(card.nationalPokedexNumbers?.[0] || 'N/A').padStart(3, '0')} 
+                        ${card.supertype || ''} ${card.subtype ? `— ${card.subtype}` : ''}
+                    </p>
                 </div>
-                ${addDetailRow('HP', card.hp)}
-                ${card.types ? addDetailRow('Type', card.types.join(', ')) : ''}
             `;
 
             // Abilities
@@ -474,39 +574,38 @@
                 let abilitiesHtml = card.abilities.map(ability => `
                     <div class="mb-2">
                         <p class="font-semibold text-gray-900">${ability.name}</p>
-                        <p class="text-sm text-gray-600">${ability.text}</p>
+                        <p class="text-xs text-gray-600 leading-tight">${ability.text}</p>
                     </div>
                 `).join('');
-                detailsHtml += addSection('Abilities', abilitiesHtml);
+                detailsHtml += addThemedSection('Abilities', abilitiesHtml);
             }
 
             // Attacks
             if (card.attacks && card.attacks.length > 0) {
                 let attacksHtml = card.attacks.map(attack => `
                     <div class="mb-2">
-                        <p class="font-semibold text-gray-900">${attack.name} <span class="text-sm font-normal text-blue-600">(${attack.cost ? attack.cost.join(', ') : 'No Cost'})</span></p>
-                        ${attack.damage ? `<p class="text-sm">Damage: ${attack.damage}</p>` : ''}
-                        <p class="text-sm text-gray-600">${attack.text}</p>
+                        <p class="font-semibold text-gray-900">${formatCosts(attack.cost)} ${attack.name} <span class="text-sm font-normal text-blue-600">(${attack.damage ? attack.damage + ' Damage' : 'No Damage'})</span></p>
+                        <p class="text-xs text-gray-600 leading-tight">${attack.text}</p>
                     </div>
                 `).join('');
-                detailsHtml += addSection('Attacks', attacksHtml);
+                detailsHtml += addThemedSection('Attacks', attacksHtml);
             }
 
             // Weaknesses, Resistances, Retreat Cost
             let statsHtml = '';
             if (card.weaknesses && card.weaknesses.length > 0) {
-                statsHtml += `<p class="text-sm text-gray-700">Weakness: ${card.weaknesses.map(w => `${w.type} ${w.value}`).join(', ')}</p>`;
+                statsHtml += `<p class="text-sm text-gray-700">Weakness: ${card.weaknesses.map(w => `${getTypeIcon(w.type)} ${w.type} ${w.value}`).join(', ')}</p>`;
             }
             if (card.resistances && card.resistances.length > 0) {
-                statsHtml += `<p class="text-sm text-gray-700">Resistance: ${card.resistances.map(r => `${r.type} ${r.value}`).join(', ')}</p>`;
+                statsHtml += `<p class="text-sm text-gray-700">Resistance: ${card.resistances.map(r => `${getTypeIcon(r.type)} ${r.type} ${r.value}`).join(', ')}</p>`;
             }
             if (card.retreatCost && card.retreatCost.length > 0) {
-                statsHtml += `<p class="text-sm text-gray-700">Retreat Cost: ${card.retreatCost.join(', ')}</p>`;
+                statsHtml += `<p class="text-sm text-gray-700">Retreat Cost: ${formatCosts(card.retreatCost)}</p>`;
             }
-            detailsHtml += addSection('Stats', statsHtml);
+            detailsHtml += addThemedSection('Stats', statsHtml);
 
             // General Info
-            detailsHtml += addSection('Card Info', `
+            detailsHtml += addThemedSection('Card Info', `
                 ${addDetailRow('Set', card.set?.name || 'N/A')}
                 ${addDetailRow('Rarity', card.rarity || 'N/A')}
                 ${addDetailRow('Artist', card.artist || 'N/A')}
@@ -515,23 +614,37 @@
 
             // Flavor Text
             if (card.flavorText) {
-                detailsHtml += addSection('Flavor Text', `<p class="text-sm italic text-gray-600">"${card.flavorText}"</p>`);
+                detailsHtml += addThemedSection('Flavor Text', `<p class="text-sm italic text-gray-600 leading-tight">"${card.flavorText}"</p>`);
             }
             
-            modalDetailsContainer.innerHTML = detailsHtml; // Set the generated HTML
-            imageModal.classList.remove('hidden'); // Show the modal
+            modalDetailsContainer.innerHTML = detailsHtml; 
+            imageModal.classList.remove('hidden'); 
         }
 
 
-        function createCardElement(card, template) {
+        function createCardElement(card, templateHtml) { // Changed 'template' to 'templateHtml' for clarity
             const cardElement = document.createElement('div');
-            cardElement.innerHTML = template;
+            cardElement.innerHTML = templateHtml; // Use the provided template HTML
             const isCollected = currentUser && completionList.some(item => item.id === card.id);
             const img = cardElement.querySelector('.card-image');
             const imageContainer = cardElement.querySelector('.img-placeholder');
             const smallImageUrl = `https://images.pokemontcg.io/${card.set.id}/${card.number}.png`;
-            // Removed largeImageUrl variable, now passed directly to showCardDetailsModal
 
+            const cardDetailsDiv = cardElement.querySelector('.card-details-info');
+            if (cardDetailsDiv) {
+                let detailsHtml = '';
+                if (card.hp) {
+                    detailsHtml += `<span class="text-red-600 font-bold">HP ${card.hp}</span> `;
+                }
+                if (card.types && card.types.length > 0) {
+                    detailsHtml += card.types.map(type => getTypeIcon(type, 'w-3 h-3')).join('');
+                }
+                if (card.set?.releaseDate) {
+                    detailsHtml += `<span class="ml-2 text-gray-500 text-[9px] whitespace-nowrap">(Released: ${card.set.releaseDate})</span>`;
+                }
+                cardDetailsDiv.innerHTML = detailsHtml;
+            }
+            
             if(img && imageContainer) {
                 const imageLoader = new Image();
                 imageLoader.src = smallImageUrl;
@@ -546,7 +659,6 @@
             }
             
             if (img) {
-                // MODIFIED: Call showCardDetailsModal with the full card object
                 img.addEventListener('click', () => {
                     showCardDetailsModal(card);
                 });
@@ -563,13 +675,13 @@
         }
 
         function displayCardAsGrid(card) {
-            const template = `<div class="text-center"><div class="img-placeholder"><img alt="${card.name}" class="card-image w-full border-4 border-black cursor-pointer opacity-0" loading="lazy"></div><div class="mt-2 text-xs"><p class="font-bold truncate">${card.name}</p></div><button data-card-id="${card.id}" class="card-btn"></button></div>`;
-            resultsContainer.appendChild(createCardElement(card, template));
+            // This is just a call to createCardElement with the specific template
+            resultsContainer.appendChild(createCardElement(card, displayCardAsGridTemplate(card)));
         }
         
         function displayCardAsList(card) {
-            const template = `<div class="game-box p-3 flex flex-col sm:flex-row items-center gap-4"><div class="img-placeholder w-20 h-28 flex-shrink-0"><img alt="${card.name}" class="card-image w-20 h-28 object-cover border-2 border-black cursor-pointer opacity-0" loading="lazy"></div><div class="flex-grow text-center sm:text-left"><p class="font-bold text-base">${card.name}</p><p class="text-xs text-gray-500">#${String(card.nationalPokedexNumbers?.[0] || 'N/A').padStart(3, '0')}</p></div><button data-card-id="${card.id}" class="card-btn"></button></div>`;
-            resultsContainer.appendChild(createCardElement(card, template));
+            // This is just a call to createCardElement with the specific template
+            resultsContainer.appendChild(createCardElement(card, displayCardAsListTemplate(card)));
         }
 
         // --- Authentication ---
@@ -636,32 +748,44 @@
             });
             closeModalButton.addEventListener('click', () => imageModal.classList.add('hidden'));
             document.addEventListener('keydown', e => e.key === 'Escape' && !imageModal.classList.contains('hidden') && imageModal.classList.add('hidden'));
-            showListBtn.addEventListener('click', () => toggleListPanel(true));
-            panelOverlay.addEventListener('click', () => toggleListPanel(false));
-            closeListBtn.addEventListener('click', () => toggleListPanel(false));
+            
+            showListBtn.addEventListener('click', () => {
+                if (!currentUser) {
+                    showToast("Please log in to manage a list.");
+                    return;
+                }
+                navigateTo('myList'); 
+            });
+            backToSearchBtn.addEventListener('click', () => navigateTo('search')); 
+
             gridViewBtn.addEventListener('click', () => setActiveView('grid'));
             listViewBtn.addEventListener('click', () => setActiveView('list'));
+            
+            myListGridViewBtn.addEventListener('click', () => setMyListView('grid')); // NEW
+            myListListViewBtn.addEventListener('click', () => setMyListView('list')); // NEW
+
             logoutBtn.addEventListener('click', () => signOut(auth));
             loginForm.addEventListener('submit', handleAuthForm);
             toggleAuthMode.addEventListener('click', () => setAuthMode(!isRegistering));
             
-            sortControls.addEventListener('click', (e) => {
+            myListSortControls.addEventListener('click', (e) => {
                 const target = e.target.closest('.sort-btn');
                 if(target){
-                    setSort(target.dataset.field, target.dataset.direction);
+                    setMyListSort(target.dataset.field, target.dataset.direction);
                 }
             });
-            filterControls.addEventListener('click', (e) => {
+            myListFilterControls.addEventListener('click', (e) => {
                 const target = e.target.closest('.filter-btn');
                 if(target){
-                    setFilter(target.dataset.type, target.dataset.value);
+                    setMyListFilter(target.dataset.type, target.dataset.value);
                 }
             });
         }
         
         // --- Initial Load ---
         function main() {
-            setActiveView('grid');
+            setActiveView('grid'); // Default view for search results
+            setMyListView('grid'); // Default view for My List page (NEW)
             onAuthStateChanged(auth, handleAuthState); 
             setupEventListeners();
         }
@@ -675,6 +799,8 @@
         }
         body { font-family: 'Press Start 2P', cursive; background-color: #e0e0e0; color: #212121; }
         .game-box { background-color: white; border: 4px solid #212121; box-shadow: 6px 6px 0px #212121; }
+        .game-box-thin { border: 2px solid #212121; box-shadow: 2px 2px 0px #212121; } 
+
         .game-btn { border: 3px solid #212121; box-shadow: 4px 4px 0px #212121; transition: all 0.1s ease-in-out; text-transform: uppercase; font-size: 14px; background-color: #fff; }
         .game-btn:hover { background-color: #f0f0f0; }
         .game-btn:active, .game-btn-active { box-shadow: 0px 0px 0px #212121; transform: translate(4px, 4px); background-color: #e0e0e0;}
@@ -691,9 +817,7 @@
         .toast { background-color: #212121; color: white; padding: 20px; border-top: 4px solid #9e9e9e; animation: slide-up 0.3s ease-out, slide-down 0.3s ease-in 2.7s forwards; font-size: 14px; text-align: center; }
         @keyframes slide-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
         @keyframes slide-down { from { transform: translateY(0); } to { transform: translateY(100%); } }
-        #myListPanel { border-left: 4px solid #212121; background-color: #f0f0f0; transition: transform 0.4s ease-in-out; transform: translateX(100%); }
-        #myListPanel.open { transform: translateX(0); }
-        #panel-overlay { transition: opacity 0.4s ease-in-out; backdrop-filter: blur(2px); }
+        
         .img-placeholder {
             display: inline-block;
             width: 100%;
@@ -710,78 +834,106 @@
         .suggestion-item:last-child { border-bottom: none; }
         .suggestion-item:hover { background-color: #f0f0f0; }
 
-        /* NEW: Modal Specific Styles */
-        #imageModal .modal-content-box { /* Apply game-box styles to inner modal content */
+        /* General Modal Styling */
+        #imageModal .modal-content-box {
             background-color: white;
             border: 4px solid #212121;
             box-shadow: 6px 6px 0px #212121;
-            border-radius: 0.5rem; /* Consistent rounded corners */
-            width: 90%; /* Default width for smaller screens */
+            border-radius: 0.5rem; 
+            width: 90%; 
             max-width: 90%;
-            overflow: hidden; /* Ensures rounded corners clip content */
+            max-height: 95vh; /* Ensured the content box itself has a max-height */
+            overflow-y: auto; /* Allow scrolling within the content box */
         }
 
-        #imageModal .detail-label {
-            color: #4A5568; /* Tailwind gray-700 equivalent for labels */
-        }
-        #imageModal .detail-value {
-            color: #2D3748; /* Tailwind gray-800 equivalent for values */
-        }
-        #imageModal h2 {
-            color: #DC2626; /* Tailwind red-700 equivalent */
-        }
-        #imageModal h3 {
-            color: #1D4ED8; /* Tailwind blue-800 equivalent */
-        }
-        #imageModal .text-red-700 {
-            color: #DC2626;
-        }
-        #imageModal .text-blue-600 {
-            color: #2563EB;
-        }
-        #imageModal .text-gray-900 {
-            color: #1A202C;
-        }
-        #imageModal .text-gray-600 {
-            color: #4A5568;
-        }
-        /* Responsive adjustments for modal content */
+        /* Responsive Modal Widths */
         @media (min-width: 640px) { /* sm breakpoint */
-            #imageModal .modal-content-box {
-                max-width: 48rem; /* Equivalent to max-w-md (48rem) for tighter control */
-            }
+            #imageModal .modal-content-box { max-width: 40rem; } 
         }
         @media (min-width: 768px) { /* md breakpoint */
-            #imageModal .modal-content-box {
-                max-width: 64rem; /* Equivalent to max-w-3xl (48rem) for tighter control */
-            }
+            #imageModal .modal-content-box { max-width: 60rem; } 
         }
         @media (min-width: 1024px) { /* lg breakpoint */
-            #imageModal .modal-content-box {
-                max-width: 80rem; /* Equivalent to max-w-4xl (56rem) for tighter control */
-            }
+            #imageModal .modal-content-box { max-width: 70rem; } 
         }
         @media (min-width: 1280px) { /* xl breakpoint */
-            #imageModal .modal-content-box {
-                max-width: 96rem; /* Equivalent to max-w-6xl (72rem) for tighter control */
-            }
+            #imageModal .modal-content-box { max-width: 80rem; } 
         }
 
         /* Custom Scrollbar for Details (Webkit browsers like Chrome/Safari) */
-        #modalDetailsContainer::-webkit-scrollbar {
+        .custom-scrollbar::-webkit-scrollbar {
             width: 8px;
         }
-        #modalDetailsContainer::-webkit-scrollbar-track {
-            background: #f0f0f0; /* Light gray track */
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f0f0f0; 
             border-radius: 10px;
         }
-        #modalDetailsContainer::-webkit-scrollbar-thumb {
-            background: #888; /* Darker gray thumb */
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #888; 
             border-radius: 10px;
         }
-        #modalDetailsContainer::-webkit-scrollbar-thumb:hover {
-            background: #555; /* Even darker on hover */
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #555; 
         }
+
+        /* Specific Modal Detail Styles */
+        #modalDetailsContainer .detail-label { color: #212121; } 
+        #modalDetailsContainer .detail-value { color: #424242; } 
+        #modalDetailsContainer h2 { color: #D32F2F; } 
+        #modalDetailsContainer h3 { color: #1976D2; } 
+        #modalDetailsContainer .text-red-600 { color: #D32F2F; } 
+        #modalDetailsContainer .text-gray-900 { color: #212121; }
+        #modalDetailsContainer .text-gray-600 { color: #616161; }
+        
+        /* Small type/energy icons */
+        .type-icon {
+            display: inline-flex; 
+            align-items: center;
+            justify-content: center;
+            width: 0.8rem; 
+            height: 0.8rem;
+            border-radius: 50%; 
+            border: 1px solid #616161; 
+            vertical-align: middle;
+            margin-right: 0.2rem;
+            box-shadow: 1px 1px 0px #212121; 
+            padding: 1px; 
+        }
+        .type-icon-text {
+            font-size: 0.5rem; 
+            line-height: 1; 
+            color: white; 
+            text-align: center;
+            font-family: sans-serif; 
+            font-weight: bold;
+        }
+        /* MODAL CLOSE BUTTON STYLES (Fixed to be outside the content box, within the overlay) */
+        #closeModal {
+            position: absolute; 
+            top: 10px; /* Aligned from the top of the modal overlay (black background) */
+            right: 10px; /* Aligned from the right of the modal overlay */
+            width: 3rem; 
+            height: 3rem;
+            font-size: 1.5rem;
+            background-color: #D32F2F; 
+            border-radius: 0.5rem; 
+            box-shadow: 4px 4px 0px #212121; 
+            z-index: 60; /* Higher z-index to ensure it's on top of everything */
+            display: flex; /* Flexbox for centering X */
+            align-items: center;
+            justify-content: center;
+            cursor: pointer; /* Indicate it's clickable */
+        }
+        #closeModal:hover {
+            background-color: #C62828; 
+            transform: scale(1.05); 
+            box-shadow: 6px 6px 0px #212121;
+        }
+        #closeModal:active {
+            box-shadow: 0px 0px 0px #212121;
+            transform: translate(4px, 4px); 
+        }
+
     </style>
 </head>
 <body class="antialiased">
@@ -798,23 +950,24 @@
     </div>
 
     <div class="max-w-7xl mx-auto p-4 md:p-8 relative z-10">
-        <header class="text-center mb-10 p-4"><h1 class="text-3xl md:text-4xl font-black mb-2 tracking-tighter">POKéMON TCG TRACKER</h1></header>
+        <!-- Main Search View -->
+        <div id="searchView" class="">
+            <header class="text-center mb-10 p-4"><h1 class="text-3xl md:text-4xl font-black mb-2 tracking-tighter">POKéMON TCG TRACKER</h1></header>
 
-        <div class="game-box p-4 md:p-6">
-            <div class="mb-6 pb-6 border-b-4 border-dashed border-gray-300">
-                <div class="flex flex-col sm:flex-row justify-between items-center gap-6">
-                    <div class="w-full sm:w-2/3">
-                        <div class="flex justify-between items-center mb-2 text-xs">
-                            <span class="font-semibold">PROGRESS</span>
-                            <span id="progressText" class="font-bold">0/1025</span>
+            <div class="game-box p-4 md:p-6">
+                <div class="mb-6 pb-6 border-b-4 border-dashed border-gray-300">
+                    <div class="flex flex-col sm:flex-row justify-between items-center gap-6">
+                        <div class="w-full sm:w-2/3">
+                            <div class="flex justify-between items-center mb-2 text-xs">
+                                <span class="font-semibold">PROGRESS</span>
+                                <span id="progressText" class="font-bold">0/1025</span>
+                            </div>
+                            <div class="progress-container"><div id="progressBar" class="progress-bar-inner" style="width: 0%"></div></div>
                         </div>
-                        <div class="progress-container"><div id="progressBar" class="progress-bar-inner" style="width: 0%"></div></div>
+                        <button id="showListBtn" class="w-full sm:w-auto game-btn py-3 px-6 text-sm" disabled>> MY LIST</button>
                     </div>
-                    <button id="showListBtn" class="w-full sm:w-auto game-btn py-3 px-6 text-sm" disabled>> MY LIST</button>
                 </div>
-            </div>
 
-            <div id="searchView">
                 <div class="max-w-xl mx-auto mb-4 flex flex-col sm:flex-row gap-4 items-center">
                     <div id="autocomplete-container" class="flex-grow w-full">
                         <input type="text" id="searchInput" class="game-input text-center w-full" placeholder="Loading...">
@@ -834,6 +987,67 @@
             </div>
         </div>
 
+        <!-- My List Full Page (NEW) -->
+        <div id="myListFullPage" class="hidden">
+            <header class="text-center mb-6">
+                <div class="flex items-center justify-between">
+                    <button id="backToSearchBtn" class="game-btn py-2 px-4 text-sm">< BACK</button>
+                    <h1 class="text-3xl md:text-4xl font-black tracking-tighter">MY LIST</h1>
+                    <div class="w-20"></div> <!-- Placeholder for alignment -->
+                </div>
+            </header>
+
+            <div class="game-box p-4 md:p-6">
+                <!-- My List Sorting Controls -->
+                <div id="myListSortControls" class="grid grid-cols-2 lg:grid-cols-3 gap-2 text-xs border-y-2 border-black py-2 mb-4">
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold">#</span>
+                        <button data-field="pokedex" data-direction="asc" title="Sort by Number Ascending" class="sort-btn game-btn p-1 border-2">▲</button>
+                        <button data-field="pokedex" data-direction="desc" title="Sort by Number Descending" class="sort-btn game-btn p-1 border-2">▼</button>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold">NAME</span>
+                        <button data-field="name" data-direction="asc" title="Sort by Name Ascending" class="sort-btn game-btn p-1 border-2">A-Z</button>
+                        <button data-field="name" data-direction="desc" title="Sort by Name Descending" class="sort-btn game-btn p-1 border-2">Z-A</button>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold">HP</span>
+                        <button data-field="hp" data-direction="asc" title="Sort by HP Ascending" class="sort-btn game-btn p-1 border-2">▲</button>
+                        <button data-field="hp" data-direction="desc" title="Sort by HP Descending" class="sort-btn game-btn p-1 border-2">▼</button>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold">RELEASE</span>
+                        <button data-field="releaseDate" data-direction="asc" title="Sort by Release Date Ascending" class="sort-btn game-btn p-1 border-2">OLD</button>
+                        <button data-field="releaseDate" data-direction="desc" title="Sort by Release Date Descending" class="sort-btn game-btn p-1 border-2">NEW</button>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold">RARITY</span>
+                        <button data-field="rarity" data-direction="asc" title="Sort by Rarity Ascending" class="sort-btn game-btn p-1 border-2">A-Z</button>
+                        <button data-field="rarity" data-direction="desc" title="Sort by Rarity Descending" class="sort-btn game-btn p-1 border-2">Z-A</button>
+                    </div>
+                </div>
+                <!-- My List Filter Controls -->
+                <div id="myListFilterControls" class="text-xs mb-4">
+                    <div id="myListLetterFilters" class="flex flex-wrap gap-1 justify-center mb-2">
+                        <!-- Letter filters will be dynamically generated here -->
+                    </div>
+                    <div id="myListRangeFilters" class="flex flex-wrap gap-1 justify-center">
+                        <!-- Range filters will be dynamically generated here -->
+                    </div>
+                </div>
+                <!-- My List View Toggle Buttons -->
+                <div class="flex justify-end gap-2 mb-4">
+                    <button id="myListGridViewBtn" title="Grid View" class="game-btn p-3">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
+                    </button>
+                    <button id="myListListViewBtn" title="List View" class="game-btn p-3">
+                        <svg class="w-5 h-5" fill="currentColor" viewbox="0 0 20 20"><path fill-rule="evenodd" d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10zm0 5.25a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75z" clip-rule="evenodd"></path></svg>
+                    </button>
+                </div>
+                <div id="myListFullPageContainer" class="flex-grow overflow-y-auto pr-2 space-y-4 custom-scrollbar"></div>
+            </div>
+        </div>
+
         <footer class="text-center mt-4">
             <div class="flex items-center justify-center gap-4">
                    <p id="userDisplay" class="text-gray-500 text-xs"></p>
@@ -842,9 +1056,9 @@
         </footer>
     </div>
     
-    <!-- MODIFIED: Image/Details Modal -->
-    <div id="imageModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-70 overflow-y-auto">
-        <div class="relative w-11/12 sm:max-w-md md:max-w-3xl lg:max-w-4xl xl:max-w-6xl modal-content-box p-6 flex flex-col md:flex-row gap-4 overflow-y-auto max-h-[95vh] rounded-lg">
+    <!-- MODAL - Stays fixed and on top -->
+    <div id="imageModal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 bg-black bg-opacity-70">
+        <div class="relative w-11/12 sm:max-w-md md:max-w-3xl lg:max-w-4xl xl:max-w-6xl modal-content-box p-6 flex flex-col md:flex-row gap-4 max-h-[95vh] rounded-lg">
             <!-- Card Image Column -->
             <div class="flex-shrink-0 flex justify-center items-start w-full md:w-1/2">
                 <img id="modalImage" src="" alt="Pokémon Card Large View" class="w-full h-auto object-contain max-h-[70vh] border-2 border-black rounded-lg shadow-lg">
@@ -853,43 +1067,13 @@
             <!-- Card Details Column -->
             <div id="modalDetailsContainer" class="flex-grow text-sm w-full md:w-1/2 p-2 overflow-y-auto custom-scrollbar">
                 <!-- Details will be dynamically inserted here -->
-                <p>Loading card details...</p> 
+                <p>Click on a card to see details...</p> 
             </div>
 
-            <button id="closeModal" class="absolute -top-4 -right-4 bg-red-500 text-white border-2 border-black h-10 w-10 font-mono text-2xl flex items-center justify-center hover:bg-red-600 rounded-full shadow-lg transition-transform duration-150 ease-in-out hover:scale-110 active:scale-95">[X]</button>
+            <!-- Close Button (Relocated and Restyled) -->
+            <button id="closeModal" class="absolute game-btn text-white font-mono flex items-center justify-center rounded-lg">[X]</button>
         </div>
     </div>
-
-    <div id="panel-overlay" class="fixed inset-0 bg-black/30 z-30 hidden"></div>
-    <aside id="myListPanel" class="fixed top-0 right-0 h-full w-full max-w-md p-6 z-40 flex flex-col">
-        <div class="flex-shrink-0">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-2xl font-bold">MY LIST</h2>
-                <button id="closeListBtn" class="text-gray-600 hover:text-black transition-colors text-3xl">[X]</button>
-            </div>
-            <div id="sortControls" class="grid grid-cols-2 gap-2 text-xs border-y-2 border-black py-2 mb-4">
-                <div class="flex items-center gap-2">
-                    <span class="font-bold">#</span>
-                    <button data-field="pokedex" data-direction="asc" title="Sort by Number Ascending" class="sort-btn game-btn p-1 border-2">▲</button>
-                    <button data-field="pokedex" data-direction="desc" title="Sort by Number Descending" class="sort-btn game-btn p-1 border-2">▼</button>
-                </div>
-                <div class="flex items-center gap-2">
-                    <span class="font-bold">NAME</span>
-                    <button data-field="name" data-direction="asc" title="Sort by Name Ascending" class="sort-btn game-btn p-1 border-2">▲</button>
-                    <button data-field="name" data-direction="desc" title="Sort by Name Descending" class="sort-btn game-btn p-1 border-2">▼</button>
-                </div>
-            </div>
-             <div id="filterControls" class="text-xs mb-4">
-                <div id="letter-filters" class="flex flex-wrap gap-1 justify-center mb-2">
-                    <!-- Letter filters will be dynamically generated here -->
-                </div>
-                <div id="range-filters" class="flex flex-wrap gap-1 justify-center">
-                    <!-- Range filters will be dynamically generated here -->
-                </div>
-            </div>
-        </div>
-        <div id="myListContainer" class="flex-grow overflow-y-auto pr-2 space-y-4"></div>
-    </aside>
 
     <div id="toast-container"></div>
 </body>
