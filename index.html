@@ -336,12 +336,13 @@
             const collectionDataDocRef = doc(collection(userDocRef, 'collection'), 'data');
             const wantsDataDocRef = doc(collection(userDocRef, 'wants'), 'data');
 
-            const newEntry = { id: card.id, pokedex: card.nationalPokedexNumbers?.[0], name: card.name, number: card.number,
-                nationalPokedexNumbers: card.nationalPokedexNumbers, set: card.set, hp: card.hp, types: card.types, 
-                rarity: card.rarity, artist: card.artist, supertype: card.supertype, subtype: card.subtype, };
+            const newEntry = {
+                id: card.id, name: card.name, number: card.number || null, pokedex: card.nationalPokedexNumbers?.[0] || null,
+                nationalPokedexNumbers: card.nationalPokedexNumbers || null, set: card.set || null, hp: card.hp || null, types: card.types || null,
+                rarity: card.rarity || null, artist: card.artist || null, supertype: card.supertype || null, subtype: card.subtype || null
+            };
             
             const wantsEntry = wantsList.find(item => item.id === card.id);
-
             const promises = [];
             
             const addPromise = updateDoc(collectionDataDocRef, { list: arrayUnion(newEntry) })
@@ -349,7 +350,8 @@
             promises.push(addPromise);
 
             if (wantsEntry) {
-                const removePromise = updateDoc(wantsDataDocRef, { list: arrayRemove(wantsEntry) });
+                const removePromise = updateDoc(wantsDataDocRef, { list: arrayRemove(wantsEntry) })
+                    .catch(e => e.code === 'not-found' ? Promise.resolve() : Promise.reject(e)); // Ignore not-found on remove
                 promises.push(removePromise);
             }
 
@@ -357,6 +359,7 @@
                 await Promise.all(promises);
             } catch (e) {
                 console.error("Error moving card from wants to collection:", e);
+                showToast(`Error: Could not save ${card.name}`, true);
             }
         }
         
@@ -367,18 +370,25 @@
             const userDocRef = doc(usersCollection, currentUser.uid);
             const wantsDataDocRef = doc(collection(userDocRef, 'wants'), 'data');
             
-            const newEntry = { id: card.id, pokedex: card.nationalPokedexNumbers?.[0], name: card.name, number: card.number,
-                nationalPokedexNumbers: card.nationalPokedexNumbers, set: card.set, hp: card.hp, types: card.types, 
-                rarity: card.rarity, artist: card.artist, supertype: card.supertype, subtype: card.subtype, };
+            const newEntry = {
+                id: card.id, name: card.name, number: card.number || null, pokedex: card.nationalPokedexNumbers?.[0] || null,
+                nationalPokedexNumbers: card.nationalPokedexNumbers || null, set: card.set || null, hp: card.hp || null, types: card.types || null,
+                rarity: card.rarity || null, artist: card.artist || null, supertype: card.supertype || null, subtype: card.subtype || null
+            };
 
             try {
                 await updateDoc(wantsDataDocRef, { list: arrayUnion(newEntry) });
             } catch (e) {
                 if (e.code === 'not-found') {
-                    await setDoc(wantsDataDocRef, { list: [newEntry] });
+                    try {
+                        await setDoc(wantsDataDocRef, { list: [newEntry] });
+                    } catch (e2) {
+                        console.error("Error setting initial wants list:", e2);
+                        showToast(`Error: Could not save ${card.name}`, true);
+                    }
                 } else {
                     console.error("Error adding to wants list:", e);
-                    showToast(`Error adding ${card.name}`, true);
+                    showToast(`Error: Could not save ${card.name}`, true);
                 }
             }
         }
