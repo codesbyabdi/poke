@@ -13,7 +13,7 @@
         // --- Firebase SDKs ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- DOM References ---
         // Views
@@ -330,52 +330,89 @@
         // --- Core App Logic ---
         async function addToList(card) {
             if (!currentUser || completionList.some(item => item.id === card.id)) return;
+            showToast(`Added ${card.name} to your list!`);
+
+            const userDocRef = doc(usersCollection, currentUser.uid);
+            const collectionDataDocRef = doc(collection(userDocRef, 'collection'), 'data');
+            const wantsDataDocRef = doc(collection(userDocRef, 'wants'), 'data');
+
             const newEntry = { id: card.id, pokedex: card.nationalPokedexNumbers?.[0], name: card.name, number: card.number,
                 nationalPokedexNumbers: card.nationalPokedexNumbers, set: card.set, hp: card.hp, types: card.types, 
                 rarity: card.rarity, artist: card.artist, supertype: card.supertype, subtype: card.subtype, };
             
-            completionList.push(newEntry);
-            wantsList = wantsList.filter(item => item.id !== card.id);
+            const wantsEntry = wantsList.find(item => item.id === card.id);
+
+            const promises = [];
             
-            updateCollectionStats(); 
-            updateSingleCardView(card.id);
-            showToast(`Added ${card.name} to your list!`);
-            await Promise.all([saveDataToFirestore('collection', completionList), saveDataToFirestore('wants', wantsList)]);
+            const addPromise = updateDoc(collectionDataDocRef, { list: arrayUnion(newEntry) })
+                .catch(e => e.code === 'not-found' ? setDoc(collectionDataDocRef, { list: [newEntry] }) : Promise.reject(e));
+            promises.push(addPromise);
+
+            if (wantsEntry) {
+                const removePromise = updateDoc(wantsDataDocRef, { list: arrayRemove(wantsEntry) });
+                promises.push(removePromise);
+            }
+
+            try {
+                await Promise.all(promises);
+            } catch (e) {
+                console.error("Error moving card from wants to collection:", e);
+            }
         }
         
         async function addToWants(card) {
-             if (!currentUser || wantsList.some(item => item.id === card.id) || completionList.some(item => item.id === card.id)) return;
+            if (!currentUser || wantsList.some(item => item.id === card.id) || completionList.some(item => item.id === card.id)) return;
+            showToast(`Added ${card.name} to your wants list!`);
+
+            const userDocRef = doc(usersCollection, currentUser.uid);
+            const wantsDataDocRef = doc(collection(userDocRef, 'wants'), 'data');
+            
             const newEntry = { id: card.id, pokedex: card.nationalPokedexNumbers?.[0], name: card.name, number: card.number,
                 nationalPokedexNumbers: card.nationalPokedexNumbers, set: card.set, hp: card.hp, types: card.types, 
                 rarity: card.rarity, artist: card.artist, supertype: card.supertype, subtype: card.subtype, };
-            
-            wantsList.push(newEntry);
-            updateCollectionStats(); 
-            updateSingleCardView(card.id);
-            showToast(`Added ${card.name} to your wants list!`);
-            await saveDataToFirestore('wants', wantsList);
+
+            try {
+                await updateDoc(wantsDataDocRef, { list: arrayUnion(newEntry) });
+            } catch (e) {
+                if (e.code === 'not-found') {
+                    await setDoc(wantsDataDocRef, { list: [newEntry] });
+                } else {
+                    console.error("Error adding to wants list:", e);
+                    showToast(`Error adding ${card.name}`, true);
+                }
+            }
         }
         
         async function removeFromWants(cardId) {
-             if (!currentUser) return;
-             wantsList = wantsList.filter(item => item.id !== cardId);
-             updateCollectionStats();
-             if (currentPage === 'wantsList') renderWantsList();
-             else updateSingleCardView(cardId);
-             await saveDataToFirestore('wants', wantsList);
-        }
+            if (!currentUser) return;
+            const wantsEntry = wantsList.find(item => item.id === cardId);
+            if (!wantsEntry) return;
 
+            const userDocRef = doc(usersCollection, currentUser.uid);
+            const wantsDataDocRef = doc(collection(userDocRef, 'wants'), 'data');
+
+            try {
+                await updateDoc(wantsDataDocRef, { list: arrayRemove(wantsEntry) });
+            } catch (e) {
+                console.error("Error removing from wants list:", e);
+            }
+        }
 
         async function removeFromList(cardId) {
             if (!currentUser) return;
             const removedItem = completionList.find(item => item.id === cardId);
-            completionList = completionList.filter(item => item.id !== cardId);
-            updateCollectionStats();
-            if (currentPage === 'myList') renderCompletionList();
-            else updateSingleCardView(cardId);
+            if (!removedItem) return;
+
+            showToast(`${removedItem.name} was removed from the list.`);
             
-            await saveDataToFirestore('collection', completionList);
-            if (removedItem) showToast(`${removedItem.name} was removed from the list.`);
+            const userDocRef = doc(usersCollection, currentUser.uid);
+            const collectionDataDocRef = doc(collection(userDocRef, 'collection'), 'data');
+
+            try {
+                await updateDoc(collectionDataDocRef, { list: arrayRemove(removedItem) });
+            } catch (e) {
+                console.error("Error removing from collection:", e);
+            }
         }
         
         function updateAllCardViews() {
