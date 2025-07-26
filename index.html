@@ -13,7 +13,7 @@
         // --- Firebase SDKs ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection, updateDoc, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, updateDoc, arrayUnion, arrayRemove, deleteDoc, enableIndexedDbPersistence, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- DOM References ---
         // Views
@@ -123,6 +123,7 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
+        enableIndexedDbPersistence(db).catch((e) => console.warn('Persistence error', e));
         const appId = firebaseConfig.appId;
 
         // --- IndexedDB Caching for Card Database ---
@@ -303,130 +304,99 @@
             if (unsubscribeFromWants) unsubscribeFromWants();
 
             const userDocRef = doc(usersCollection, userId);
-            const collectionDocRef = doc(collection(userDocRef, 'collection'), 'data');
-            const wantsDocRef = doc(collection(userDocRef, 'wants'), 'data');
-            
-            unsubscribeFromCollection = onSnapshot(collectionDocRef, (docSnap) => {
-                completionList = docSnap.exists() ? docSnap.data().list || [] : [];
-                
-                if (currentPage === 'myList') {
-                    renderCompletionList();
-                } else if (currentPage.startsWith('setView_')) {
-                    // Re-render the set view to update collected status
-                    navigateTo(currentPage); 
-                } else if (lastDisplayedCards.length > 0) {
-                    updateAllCardViews();
-                }
+
+            const collectionColRef = collection(userDocRef, 'collection');
+            const wantsColRef = collection(userDocRef, 'wants');
+
+            const processSnapshot = (snap, targetArray, onDone) => {
+                targetArray.length = 0; // reset without losing reference
+                snap.docs.forEach(d => {
+                    const cardId = d.id;
+                    const cardMeta = localCardDatabase[cardId] || { id: cardId };
+                    targetArray.push(cardMeta);
+                });
+                if (typeof onDone === 'function') onDone();
+                updateAllCardViews();
                 updateCollectionStats();
+            };
+
+            unsubscribeFromCollection = onSnapshot(collectionColRef, (snap) => {
+                processSnapshot(snap, completionList, () => {
+                    if (currentPage === 'myList') renderCompletionList();
+                    else if (currentPage.startsWith('setView_')) navigateTo(currentPage);
+                });
             });
 
-            unsubscribeFromWants = onSnapshot(wantsDocRef, (docSnap) => {
-                wantsList = docSnap.exists() ? docSnap.data().list || [] : [];
-
-                if (currentPage === 'wantsList') {
-                    renderWantsList();
-                } else if (lastDisplayedCards.length > 0) {
-                    updateAllCardViews();
-                }
-                updateCollectionStats();
+            unsubscribeFromWants = onSnapshot(wantsColRef, (snap) => {
+                processSnapshot(snap, wantsList, () => {
+                    if (currentPage === 'wantsList') renderWantsList();
+                });
             });
         }
 
         // --- Core App Logic ---
         async function addToList(card) {
-            if (!currentUser || completionList.some(item => item.id === card.id)) return;
+            if (!currentUser) {
+                showToast('Please log in to use this feature.');
+                showLoginModal();
+                return;
+            }
+            if (completionList.some(item => item.id === card.id)) return;
             showToast(`Added ${card.name} to your list!`);
 
             const userDocRef = doc(usersCollection, currentUser.uid);
-            const collectionDataDocRef = doc(collection(userDocRef, 'collection'), 'data');
-            const wantsDataDocRef = doc(collection(userDocRef, 'wants'), 'data');
-
-            const newEntry = {
-                id: card.id, name: card.name, number: card.number || null, pokedex: card.nationalPokedexNumbers?.[0] || null,
-                nationalPokedexNumbers: card.nationalPokedexNumbers || null, set: card.set || null, hp: card.hp || null, types: card.types || null,
-                rarity: card.rarity || null, artist: card.artist || null, supertype: card.supertype || null, subtype: card.subtype || null
-            };
-            
-            const wantsEntry = wantsList.find(item => item.id === card.id);
-            const promises = [];
-            
-            const addPromise = updateDoc(collectionDataDocRef, { list: arrayUnion(newEntry) })
-                .catch(e => e.code === 'not-found' ? setDoc(collectionDataDocRef, { list: [newEntry] }) : Promise.reject(e));
-            promises.push(addPromise);
-
-            if (wantsEntry) {
-                const removePromise = updateDoc(wantsDataDocRef, { list: arrayRemove(wantsEntry) })
-                    .catch(e => e.code === 'not-found' ? Promise.resolve() : Promise.reject(e)); // Ignore not-found on remove
-                promises.push(removePromise);
-            }
+            const collectionCardRef = doc(collection(userDocRef, 'collection'), card.id);
+            const wantsCardRef = doc(collection(userDocRef, 'wants'), card.id);
 
             try {
-                await Promise.all(promises);
-            } catch (e) {
-                console.error("Error moving card from wants to collection:", e);
+                await setDoc(collectionCardRef, { ts: serverTimestamp() });
+                await deleteDoc(wantsCardRef).catch(()=>{});
+            } catch(e) {
+                console.error('Error saving card', e);
                 showToast(`Error: Could not save ${card.name}`, true);
             }
         }
         
         async function addToWants(card) {
-            if (!currentUser || wantsList.some(item => item.id === card.id) || completionList.some(item => item.id === card.id)) return;
+            if (!currentUser) {
+                showToast('Please log in to use this feature.');
+                showLoginModal();
+                return;
+            }
+            if (wantsList.some(item => item.id === card.id) || completionList.some(item => item.id === card.id)) return;
             showToast(`Added ${card.name} to your wants list!`);
 
             const userDocRef = doc(usersCollection, currentUser.uid);
-            const wantsDataDocRef = doc(collection(userDocRef, 'wants'), 'data');
-            
-            const newEntry = {
-                id: card.id, name: card.name, number: card.number || null, pokedex: card.nationalPokedexNumbers?.[0] || null,
-                nationalPokedexNumbers: card.nationalPokedexNumbers || null, set: card.set || null, hp: card.hp || null, types: card.types || null,
-                rarity: card.rarity || null, artist: card.artist || null, supertype: card.supertype || null, subtype: card.subtype || null
-            };
+            const wantsCardRef = doc(collection(userDocRef, 'wants'), card.id);
 
             try {
-                await updateDoc(wantsDataDocRef, { list: arrayUnion(newEntry) });
-            } catch (e) {
-                if (e.code === 'not-found') {
-                    try {
-                        await setDoc(wantsDataDocRef, { list: [newEntry] });
-                    } catch (e2) {
-                        console.error("Error setting initial wants list:", e2);
-                        showToast(`Error: Could not save ${card.name}`, true);
-                    }
-                } else {
-                    console.error("Error adding to wants list:", e);
-                    showToast(`Error: Could not save ${card.name}`, true);
-                }
+                await setDoc(wantsCardRef, { ts: serverTimestamp() });
+            } catch(e) {
+                console.error('Error adding to wants', e);
+                showToast(`Error: Could not save ${card.name}`, true);
             }
         }
         
         async function removeFromWants(cardId) {
             if (!currentUser) return;
-            const wantsEntry = wantsList.find(item => item.id === cardId);
-            if (!wantsEntry) return;
-
             const userDocRef = doc(usersCollection, currentUser.uid);
-            const wantsDataDocRef = doc(collection(userDocRef, 'wants'), 'data');
-
             try {
-                await updateDoc(wantsDataDocRef, { list: arrayRemove(wantsEntry) });
-            } catch (e) {
-                console.error("Error removing from wants list:", e);
+                await deleteDoc(doc(collection(userDocRef, 'wants'), cardId));
+                showToast(`Removed from wants list.`);
+            } catch(e) {
+                console.error('Remove from wants failed', e);
             }
         }
 
         async function removeFromList(cardId) {
             if (!currentUser) return;
-            const removedItem = completionList.find(item => item.id === cardId);
-            if (!removedItem) return;
-
-            showToast(`${removedItem.name} was removed from the list.`);
-            
             const userDocRef = doc(usersCollection, currentUser.uid);
-            const collectionDataDocRef = doc(collection(userDocRef, 'collection'), 'data');
-
+            const removedItem = completionList.find(c => c.id === cardId) || { name: 'Card' };
             try {
-                await updateDoc(collectionDataDocRef, { list: arrayRemove(removedItem) });
-            } catch (e) {
-                console.error("Error removing from collection:", e);
+                await deleteDoc(doc(collection(userDocRef, 'collection'), cardId));
+                showToast(`${removedItem.name} was removed from the list.`);
+            } catch(e) {
+                console.error('Remove from list failed', e);
             }
         }
         
@@ -604,6 +574,7 @@
                         console.log(`Loaded ${cachedCards.length} cards from IndexedDB.`);
                         localCardDatabase = {};
                         cachedCards.forEach(card => localCardDatabase[card.id] = card);
+                        isDatabaseSynced = true;
                         return;
                     }
                     
@@ -634,7 +605,7 @@
                         chunks.push(value);
                         receivedLength += value.length;
 
-                        const percent = Math.round((receivedLength / contentLength) * 100);
+                        const percent = Math.min(100, Math.round((receivedLength / contentLength) * 100));
                         progressBar.style.width = `${percent}%`;
                         const receivedMB = (receivedLength / (1024 * 1024)).toFixed(1);
                         const totalMB = (contentLength / (1024 * 1024)).toFixed(1);
@@ -656,6 +627,8 @@
                     localCardDatabase = {};
                     dataArray.forEach(card => localCardDatabase[card.id] = card);
                     
+                    isDatabaseSynced = true;
+                     
                     searchControls.classList.remove('hidden');
                     progressBarContainer.classList.add('hidden');
 
@@ -684,14 +657,39 @@
             displayAutocomplete(Array.from(suggestions).slice(0, 5));
         }
 
+        // --- Online Search Fallback (used until local DB is ready) ---
+        async function remoteSearch(query) {
+            if (!query) return;
+            showStatus('SEARCHING ONLINE...');
+            const isPokedexNumber = /^\d+$/.test(query);
+            const endpoint = isPokedexNumber
+                ? `https://api.pokemontcg.io/v2/cards?q=nationalPokedexNumbers:${query}`
+                : `https://api.pokemontcg.io/v2/cards?q=name:${encodeURIComponent(query)}*`;
+            try {
+                const res = await fetch(endpoint);
+                const data = await res.json();
+                lastDisplayedCards = data.data || [];
+                displayCards(lastDisplayedCards);
+                if (lastDisplayedCards.length === 0) showStatus(`No cards found for "${query}".`, true);
+                else showStatus(`${lastDisplayedCards.length} cards found (online).`);
+            } catch (e) {
+                console.error('Online search failed', e);
+                showStatus('Error fetching online results.', true);
+            }
+        }
+
         function searchLocalDatabase(query) {
-            showStatus('SEARCHING...');
             if (!query) {
                 lastDisplayedCards = [];
                 resultsContainer.innerHTML = '';
                 showStatus('');
                 return;
             }
+            if (!isDatabaseSynced) {
+                remoteSearch(query);
+                return;
+            }
+            showStatus('SEARCHING...');
             
             const isPokedexNumber = /^\d+$/.test(query);
             const lowerCaseQuery = query.toLowerCase();
@@ -1051,7 +1049,6 @@
                 showWantsBtn.disabled = false;
                 
                 // --- Set a clean loading state ---
-                searchControls.classList.add('hidden');
                 statusDisplay.classList.add('hidden');
 
                 await syncLocalDatabases(); 
@@ -1061,29 +1058,36 @@
                 searchControls.classList.remove('hidden');
                 statusDisplay.classList.remove('hidden');
                 searchInput.placeholder = "Search Name or Pokédex Nr.";
+                searchInput.disabled = false;
                 
                 listenToUserData(user.uid);
                 navigateTo('search'); 
                 showStatus('Search for a card to begin!');
             } else {
                 currentUser = null;
+                hideLoginModal(); // keep modal hidden until needed
+                userDisplay.textContent = 'GUEST';
+                logoutBtn.classList.add('hidden');
+                showListBtn.disabled = true;
+                showSetsBtn.disabled = false; // allow browsing sets without login
+                showWantsBtn.disabled = true;
+                searchInput.disabled = false;
+                searchInput.placeholder = "Search Name or Pokédex Nr.";
+                searchControls.classList.remove('hidden');
+                statusDisplay.classList.remove('hidden');
+                resultsContainer.innerHTML = '';
+                lastDisplayedCards = [];
                 completionList = [];
                 wantsList = [];
                 updateCollectionStats();
                 if (unsubscribeFromCollection) unsubscribeFromCollection();
                 if (unsubscribeFromWants) unsubscribeFromWants();
-                loginModal.classList.remove('hidden');
-                userDisplay.textContent = 'LOGGED OUT';
-                logoutBtn.classList.add('hidden');
-                showListBtn.disabled = true;
-                showSetsBtn.disabled = true;
-                showWantsBtn.disabled = true;
-                searchInput.disabled = true;
-                searchInput.placeholder = "Please log in...";
-                resultsContainer.innerHTML = '';
-                lastDisplayedCards = [];
             }
         }
+        
+        // --- Login Modal Helpers ---
+        function showLoginModal() { loginModal.classList.remove('hidden'); }
+        function hideLoginModal() { loginModal.classList.add('hidden'); }
         
         function applyDarkMode(isDark) {
             const sunIcon = `<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>`;
@@ -1110,9 +1114,9 @@
             closeModalButton.addEventListener('click', () => imageModal.classList.add('hidden'));
             document.addEventListener('keydown', e => e.key === 'Escape' && !imageModal.classList.contains('hidden') && imageModal.classList.add('hidden'));
             
-            showListBtn.addEventListener('click', () => { if (currentUser) navigateTo('myList'); });
-            showWantsBtn.addEventListener('click', () => { if (currentUser) navigateTo('wantsList'); });
-            showSetsBtn.addEventListener('click', () => { if (currentUser) navigateTo('sets'); });
+            showListBtn.addEventListener('click', () => { if (currentUser) navigateTo('myList'); else showLoginModal(); });
+            showWantsBtn.addEventListener('click', () => { if (currentUser) navigateTo('wantsList'); else showLoginModal(); });
+            showSetsBtn.addEventListener('click', () => navigateTo('sets'));
             backToSetsBtn.addEventListener('click', () => navigateTo('sets'));
             backToSearchBtnMyList.addEventListener('click', () => navigateTo('search'));
             backToSearchBtnSets.addEventListener('click', () => navigateTo('search'));
@@ -1149,6 +1153,9 @@
             const savedTheme = localStorage.getItem('darkMode');
             applyDarkMode(savedTheme === 'true' || (savedTheme === null && prefersDark));
             
+            hideLoginModal();
+            showSetsBtn.disabled = false; // allow browsing sets without login
+            syncLocalDatabases();
             onAuthStateChanged(auth, handleAuthState); 
             setupEventListeners();
         }
