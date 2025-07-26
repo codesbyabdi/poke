@@ -1172,5 +1172,56 @@
     </div>
 
     <div id="toast-container"></div>
+                        <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getFirestore, doc, setDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // 1. PASTE YOUR FIREBASE CONFIGURATION HERE
+    const firebaseConfig = {
+        apiKey: "...",
+        authDomain: "...",
+        projectId: "...",
+        storageBucket: "...",
+        messagingSenderId: "...",
+        appId: "..."
+    };
+
+    // Initialize Firebase
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    // This function will upload your data
+    async function uploadPokemonData() {
+        console.log("Fetching local JSON file...");
+        const response = await fetch('pokemon-tcg-db.json');
+        const cards = await response.json();
+        console.log(`Found ${cards.length} cards to upload.`);
+
+        // Firestore allows batch writes of up to 500 documents at a time.
+        const batchSize = 500;
+        for (let i = 0; i < cards.length; i += batchSize) {
+            const batch = writeBatch(db);
+            const chunk = cards.slice(i, i + batchSize);
+
+            console.log(`Preparing batch ${Math.floor(i / batchSize) + 1}...`);
+            chunk.forEach(card => {
+                // We use the card's own 'id' as the document ID in Firestore
+                const docRef = doc(db, "cards", card.id);
+                batch.set(docRef, card);
+            });
+
+            console.log("Uploading batch...");
+            await batch.commit();
+            console.log(`Batch ${Math.floor(i / batchSize) + 1} uploaded successfully.`);
+        }
+        console.log("All data uploaded to Firestore!");
+        alert("All Pokémon card data has been successfully uploaded to your Firestore database in the 'cards' collection!");
+    }
+
+    // Make the function available globally so you can call it from the console
+    window.uploadPokemonData = uploadPokemonData;
+    console.log("Ready to upload. Run 'uploadPokemonData()' from the console.");
+
+</script>
 </body>
 </html>
