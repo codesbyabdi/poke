@@ -575,6 +575,13 @@
                         localCardDatabase = {};
                         cachedCards.forEach(card => localCardDatabase[card.id] = card);
                         isDatabaseSynced = true;
+                        // Hydrate existing placeholder entries now that we have full metadata
+                        completionList = completionList.map(c => localCardDatabase[c.id] || c);
+                        wantsList = wantsList.map(c => localCardDatabase[c.id] || c);
+                        updateAllCardViews();
+                        if(currentPage==='myList') renderCompletionList();
+                        if(currentPage==='wantsList') renderWantsList();
+                        updateCollectionStats();
                         return;
                     }
                     
@@ -879,26 +886,29 @@
         }
 
         function createCardElement(card, templateHtml) {
+            // Ensure we have full metadata (placeholder objects from Firestore may only contain the id)
+            const fullCard = card.set ? card : (localCardDatabase[card.id] || card);
+
             const cardElement = document.createElement('div');
             cardElement.innerHTML = templateHtml;
             const rootEl = cardElement.firstElementChild;
-            rootEl.dataset.cardId = card.id;
+            rootEl.dataset.cardId = fullCard.id;
 
-            const isCollected = currentUser && completionList.some(item => item.id === card.id);
-            const isWanted = currentUser && wantsList.some(item => item.id === card.id);
+            const isCollected = currentUser && completionList.some(item => item.id === fullCard.id);
+            const isWanted = currentUser && wantsList.some(item => item.id === fullCard.id);
 
             const img = rootEl.querySelector('.card-image');
             const imageContainer = rootEl.querySelector('.img-placeholder');
-            const smallImageUrl = `https://images.pokemontcg.io/${card.set?.id}/${card.number}.png`;
+            const smallImageUrl = `https://images.pokemontcg.io/${fullCard.set?.id}/${fullCard.number}.png`;
 
             const cardDetailsDiv = rootEl.querySelector('.card-details-info');
             if (cardDetailsDiv) {
-                const setSymbolUrl = card.set?.images?.symbol;
-                const setName = card.set?.name || '';
-                const printedTotal = card.set?.printedTotal;
-                const cardNumber = card.number || '';
-                const rarity = card.rarity || '';
-                const pokedexNumber = card.nationalPokedexNumbers?.[0] || card.pokedex;
+                const setSymbolUrl = fullCard.set?.images?.symbol;
+                const setName = fullCard.set?.name || '';
+                const printedTotal = fullCard.set?.printedTotal;
+                const cardNumber = fullCard.number || '';
+                const rarity = fullCard.rarity || '';
+                const pokedexNumber = fullCard.nationalPokedexNumbers?.[0] || fullCard.pokedex;
 
                 let numberString = (cardNumber && printedTotal) ? `${cardNumber}/${printedTotal}` : cardNumber || '';
                 let detailsHtml = `
@@ -921,7 +931,7 @@
             
             if(img && imageContainer) {
                 const imageLoader = new Image();
-                if (card.set?.id && card.number) {
+                if (fullCard.set?.id && fullCard.number) {
                     imageLoader.src = smallImageUrl;
                     imageLoader.onload = () => { img.src = imageLoader.src; img.classList.remove('opacity-0'); imageContainer.classList.remove('img-placeholder'); };
                     imageLoader.onerror = () => { imageContainer.innerHTML = `<div class="w-full h-full flex items-center justify-center bg-gray-300 dark:bg-gray-700 text-xs p-2 text-center">Image Not Found</div>`; imageContainer.classList.remove('img-placeholder');};
@@ -933,14 +943,14 @@
             
             if (img) {
                 img.addEventListener('click', () => {
-                    const fullCardData = localCardDatabase[card.id] || card;
+                    const fullCardData = localCardDatabase[fullCard.id] || fullCard;
                     showCardDetailsModal(fullCardData);
                 });
             }
 
             const buttonContainer = rootEl.querySelector('.card-btn-container');
             if (buttonContainer) {
-                buttonContainer.innerHTML = createCardButtons(card, isCollected, isWanted);
+                buttonContainer.innerHTML = createCardButtons(fullCard, isCollected, isWanted);
             }
             return rootEl;
         }
@@ -1052,6 +1062,14 @@
                 statusDisplay.classList.add('hidden');
 
                 await syncLocalDatabases(); 
+
+                // Ensure any list items received before DB sync now have full metadata
+                completionList = completionList.map(c => localCardDatabase[c.id] || c);
+                wantsList       = wantsList.map(c => localCardDatabase[c.id] || c);
+                updateAllCardViews();
+                if(currentPage==='myList') renderCompletionList();
+                if(currentPage==='wantsList') renderWantsList();
+                updateCollectionStats();
 
                 // --- Restore UI after sync ---
                 progressBarContainer.classList.add('hidden');
