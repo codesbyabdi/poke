@@ -66,6 +66,8 @@
         const myListGridViewBtn = document.getElementById('myListGridViewBtn');
         const myListListViewBtn = document.getElementById('myListListViewBtn');
         const backToSearchBtnMyList = document.getElementById('backToSearchBtnMyList');
+        const calculateValueBtn = document.getElementById('calculateValueBtn');
+        const totalValueDisplay = document.getElementById('totalValueDisplay');
         
         // "Wants List" Page
         const wantsListContainer = document.getElementById('wantsListContainer');
@@ -179,13 +181,20 @@
             const uniquePokedex = new Set(completionList.map(c => c.pokedex)).size;
             const uniqueSets = new Set(completionList.map(c => c.set.id)).size;
             const wantsCount = wantsList.length;
+            const percentage = (uniquePokedex / TOTAL_POKEMON_SPECIES) * 100;
 
             collectionStatsContainer.innerHTML = `
-                <div class="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-2 text-xs">
-                    <div class="font-bold">UNIQUE SPECIES: <span class="font-normal text-blue-600 dark:text-blue-400">${uniquePokedex}/${TOTAL_POKEMON_SPECIES}</span></div>
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-3 text-xs mb-3">
                     <div class="font-bold">TOTAL CARDS: <span class="font-normal text-blue-600 dark:text-blue-400">${totalCards}</span></div>
                     <div class="font-bold">UNIQUE SETS: <span class="font-normal text-blue-600 dark:text-blue-400">${uniqueSets}</span></div>
                     <div class="font-bold">WANTS LIST: <span class="font-normal text-red-600 dark:text-red-400">${wantsCount}</span></div>
+                </div>
+                 <div class="w-full">
+                    <div class="flex justify-between items-center mb-1 text-xs">
+                        <span class="font-semibold">UNIQUE SPECIES</span>
+                        <span class="font-bold">${uniquePokedex}/${TOTAL_POKEMON_SPECIES}</span>
+                    </div>
+                    <div class="progress-container"><div class="progress-bar-inner" style="width: ${percentage.toFixed(1)}%"></div></div>
                 </div>
             `;
         }
@@ -468,15 +477,12 @@
 
             const syncCards = async () => {
                 try {
-                    searchInput.placeholder = "Loading database...";
                     showStatus('SYNCING DATABASE (first load might take a moment)...');
                     const response = await fetch(cardDbUrl);
                     if (!response.ok) throw new Error(`Network response not ok. Status: ${response.status}`);
                     const dataArray = await response.json(); 
                     localCardDatabase = {};
                     dataArray.forEach(card => localCardDatabase[card.id] = card);
-                    showStatus('DATABASE SYNCED. READY!');
-                    searchInput.placeholder = "Search Name or Pokédex Nr.";
                 } catch (error) { 
                     showStatus(`DB SYNC FAILED: ${error.message}`, true); 
                     searchInput.placeholder = "DB Load Failed. Refresh.";
@@ -566,28 +572,12 @@
             }
         }
         
-        async function showCardDetailsModal(card) {
+        function showCardDetailsModal(card) {
             const pokedexNumber = card.nationalPokedexNumbers?.[0] || card.pokedex || 'N/A';
             const largeImageUrl = `https://images.pokemontcg.io/${card.set?.id}/${card.number}_hires.png`;
             modalImage.src = largeImageUrl;
             modalImage.onerror = () => { modalImage.src = `https://images.pokemontcg.io/${card.set?.id}/${card.number}.png`; }
-            modalDetailsContainer.innerHTML = '<p class="text-center">Loading details...</p>';
-            imageModal.classList.remove('hidden'); 
             
-            let priceHtml = '<p class="text-xs font-bold text-gray-500">Price data not available.</p>';
-            try {
-                const priceResponse = await fetch(`https://api.pokemontcg.io/v2/cards/${card.id}`);
-                const priceData = await priceResponse.json();
-                const marketPrices = priceData.data?.tcgplayer?.prices;
-                if (marketPrices) {
-                    priceHtml = Object.entries(marketPrices).map(([rarity, prices]) => {
-                        if (!prices.market) return '';
-                        return `<div class="flex justify-between items-center text-xs"><span class="capitalize font-bold">${rarity.replace(/([A-Z])/g, ' $1').trim()}:</span> <span class="text-green-600 dark:text-green-400 font-bold">$${prices.market.toFixed(2)}</span></div>`;
-                    }).join('');
-                }
-            } catch (e) { console.error("Could not fetch price data", e); }
-
-
             const addDetailRow = (label, value) => {
                 if (!value || (Array.isArray(value) && value.length === 0)) return '';
                 return `<p class="text-xs"><span class="font-bold uppercase">${label}:</span> ${value}</p>`;
@@ -615,7 +605,9 @@
                     </p>
                 </div>
             `;
-            detailsHtml += addThemedSection('Market Value', priceHtml);
+
+            detailsHtml += addThemedSection('Market Value', `<div id="price-container"><p class="text-xs text-gray-500">Loading price...</p></div>`);
+
             if (card.attacks?.length > 0) {
                 let attacksHtml = card.attacks.map(attack => `<div><p class="font-bold text-gray-900 dark:text-gray-100 flex justify-between items-center"><span class="flex items-center gap-1">${formatCosts(attack.cost)} ${attack.name}</span>${attack.damage ? `<span class="text-blue-600 dark:text-blue-400">${attack.damage} Damage</span>` : ''}</p>${attack.text ? `<p class="text-xs text-gray-600 dark:text-gray-400 leading-tight mt-1">${attack.text}</p>`: ''}</div>`).join('');
                 detailsHtml += addThemedSection('Attacks', attacksHtml);
@@ -633,7 +625,63 @@
             if (card.flavorText) detailsHtml += addThemedSection('Flavor Text', `<p class="text-xs italic text-gray-600 dark:text-gray-400 leading-tight">"${card.flavorText}"</p>`);
             
             modalDetailsContainer.innerHTML = detailsHtml; 
+            imageModal.classList.remove('hidden'); 
+
+            // Asynchronously fetch price
+            fetch(`https://api.pokemontcg.io/v2/cards/${card.id}`)
+                .then(res => res.json())
+                .then(priceData => {
+                    const priceContainer = document.getElementById('price-container');
+                    if (!priceContainer) return;
+
+                    const marketPrices = priceData.data?.tcgplayer?.prices;
+                    if (marketPrices) {
+                        const priceHtml = Object.entries(marketPrices).map(([rarity, prices]) => {
+                            if (!prices.market) return '';
+                            return `<div class="flex justify-between items-center text-xs"><span class="capitalize font-bold">${rarity.replace(/([A-Z])/g, ' $1').trim()}:</span> <span class="text-green-600 dark:text-green-400 font-bold">$${prices.market.toFixed(2)}</span></div>`;
+                        }).join('');
+                        priceContainer.innerHTML = priceHtml || '<p class="text-xs font-bold text-gray-500">Price data not available.</p>';
+                    } else {
+                         priceContainer.innerHTML = '<p class="text-xs font-bold text-gray-500">Price data not available.</p>';
+                    }
+                })
+                .catch(e => {
+                     const priceContainer = document.getElementById('price-container');
+                     if(priceContainer) priceContainer.innerHTML = '<p class="text-xs font-bold text-red-500">Could not fetch price.</p>';
+                     console.error("Could not fetch price data", e)
+                });
         }
+        
+        async function calculateCollectionValue() {
+            calculateValueBtn.disabled = true;
+            totalValueDisplay.innerHTML = `TOTAL VALUE: <span class="font-normal text-blue-600 dark:text-blue-400">Calculating...</span>`;
+            
+            let totalValue = 0;
+            const pricePromises = completionList.map(card => 
+                fetch(`https://api.pokemontcg.io/v2/cards/${card.id}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        const prices = data.data?.tcgplayer?.prices;
+                        if (prices) {
+                            const priceTypes = ['holofoil', 'reverseHolofoil', '1stEditionHolofoil', 'unlimitedHolofoil', 'normal'];
+                            for (const type of priceTypes) {
+                                if (prices[type]?.market) {
+                                    return prices[type].market;
+                                }
+                            }
+                        }
+                        return 0; // Return 0 if no price found
+                    })
+                    .catch(() => 0) // Return 0 on error
+            );
+
+            const prices = await Promise.all(pricePromises);
+            totalValue = prices.reduce((sum, price) => sum + price, 0);
+
+            totalValueDisplay.innerHTML = `TOTAL VALUE: <span class="font-normal text-green-600 dark:text-green-400">$${totalValue.toFixed(2)}</span>`;
+            calculateValueBtn.disabled = false;
+        }
+
 
         function createCardButtons(card, isCollected, isWanted) {
             if (isCollected) {
@@ -807,6 +855,7 @@
                 searchInput.placeholder = "Loading database...";
                 await syncLocalDatabases(); 
                 searchInput.disabled = false;
+                searchInput.placeholder = "Search Name or Pokédex Nr.";
                 listenToUserData(user.uid);
                 navigateTo('search'); 
                 showStatus('Search for a card to begin!');
@@ -863,6 +912,8 @@
             backToSearchBtnSets.addEventListener('click', () => navigateTo('search'));
             backToSearchBtnWants.addEventListener('click', () => navigateTo('search'));
 
+            calculateValueBtn.addEventListener('click', calculateCollectionValue);
+
             gridViewBtn.addEventListener('click', () => setActiveView('grid', 'search'));
             listViewBtn.addEventListener('click', () => setActiveView('list', 'search'));
             myListGridViewBtn.addEventListener('click', () => setActiveView('grid', 'myList'));
@@ -885,7 +936,6 @@
         function main() {
             setActiveView('grid', 'search');
             setActiveView('grid', 'myList');
-            // **FIX**: Re-added the sort controls initialization for the search page.
             createSortControls(searchSortControls, searchSort, () => displayCards(lastDisplayedCards));
             createSortControls(myListSortControlsContainer, myListSort, renderCompletionList);
             const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -1088,7 +1138,9 @@
             <div class="game-box p-4 md:p-6">
                 <div class="flex flex-col md:flex-row justify-between items-center gap-4 mb-4 border-b-2 border-dashed border-gray-300 dark:border-gray-700 pb-4">
                     <div id="myListSortControls" class="flex items-center"></div>
-                    <div class="flex justify-end gap-2">
+                    <div class="flex justify-end gap-2 items-center">
+                        <div id="totalValueDisplay" class="text-xs font-bold mr-4"></div>
+                        <button id="calculateValueBtn" class="game-btn py-2 px-4 text-xs">CALC. VALUE</button>
                         <button id="myListGridViewBtn" title="Grid View" class="game-btn p-3"><svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM11 13a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg></button>
                         <button id="myListListViewBtn" title="List View" class="game-btn p-3"><svg class="w-5 h-5" fill="currentColor" viewbox="0 0 20 20"><path fill-rule="evenodd" d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10zm0 5.25a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75z" clip-rule="evenodd"></path></svg></button>
                     </div>
