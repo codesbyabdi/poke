@@ -13,7 +13,7 @@
         // --- Firebase SDKs ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- DOM References ---
         // Views
@@ -52,6 +52,7 @@
         const loginForm = document.getElementById('loginForm');
         const emailInput = document.getElementById('emailInput');
         const passwordInput = document.getElementById('passwordInput');
+        const confirmPasswordInput = document.getElementById('confirmPasswordInput');
         const loginError = document.getElementById('loginError');
         const loginTitle = document.getElementById('loginTitle');
         const loginSubmitBtn = document.getElementById('loginSubmitBtn');
@@ -118,6 +119,9 @@
         const auth = getAuth(app);
         const db = getFirestore(app);
         const appId = firebaseConfig.appId;
+
+        // --- Firestore References ---
+        const usersCollection = collection(db, 'users');
 
         // --- Helper for Type/Energy Icons ---
         const typeColors = {
@@ -227,8 +231,10 @@
         async function saveDataToFirestore(collectionName, data) {
             if (!currentUser) return;
             try {
-                const userDocRef = doc(db, "artifacts", appId, "users", currentUser.uid, collectionName, "data");
-                await setDoc(userDocRef, { list: data });
+                const userDocRef = doc(usersCollection, currentUser.uid);
+                const subCollectionRef = collection(userDocRef, collectionName);
+                const dataDocRef = doc(subCollectionRef, 'data');
+                await setDoc(dataDocRef, { list: data });
             } catch (error) { console.error(`Error saving ${collectionName}:`, error); }
         }
 
@@ -236,8 +242,9 @@
             if (unsubscribeFromCollection) unsubscribeFromCollection();
             if (unsubscribeFromWants) unsubscribeFromWants();
 
-            const collectionDocRef = doc(db, "artifacts", appId, "users", userId, "collection", "data");
-            const wantsDocRef = doc(db, "artifacts", appId, "users", userId, "wants", "data");
+            const userDocRef = doc(usersCollection, userId);
+            const collectionDocRef = doc(collection(userDocRef, 'collection'), 'data');
+            const wantsDocRef = doc(collection(userDocRef, 'wants'), 'data');
             
             unsubscribeFromCollection = onSnapshot(collectionDocRef, (docSnap) => {
                 const serverList = docSnap.exists() ? docSnap.data().list || [] : [];
@@ -829,17 +836,36 @@
             loginTitle.textContent = isRegister ? 'CREATE ACCOUNT' : 'PLAYER LOGIN';
             loginSubmitBtn.textContent = isRegister ? '> REGISTER' : '> LOGIN';
             toggleAuthMode.innerHTML = isRegister ? 'Have an account? <span class="underline">Login</span>' : 'Need an account? <span class="underline">Register</span>';
+            
+            confirmPasswordInput.classList.toggle('hidden', !isRegister);
+            passwordInput.classList.toggle('mb-6', !isRegister);
+            passwordInput.classList.toggle('mb-4', isRegister);
+            if (!isRegister) {
+                confirmPasswordInput.value = '';
+            }
         }
 
         async function handleAuthForm(e) {
             e.preventDefault();
             const email = emailInput.value;
             const password = passwordInput.value;
+            const confirmPassword = confirmPasswordInput.value;
             loginError.textContent = '';
+            
+            if (isRegistering && password !== confirmPassword) {
+                loginError.textContent = 'Passwords do not match.';
+                return;
+            }
+            
             try {
-                if (isRegistering) await createUserWithEmailAndPassword(auth, email, password);
-                else await signInWithEmailAndPassword(auth, email, password);
-            } catch (error) { loginError.textContent = error.message.replace('Firebase: ', ''); }
+                if (isRegistering) {
+                    await createUserWithEmailAndPassword(auth, email, password);
+                } else {
+                    await signInWithEmailAndPassword(auth, email, password);
+                }
+            } catch (error) { 
+                loginError.textContent = error.message.replace('Firebase: ', ''); 
+            }
         }
         
         async function handleAuthState(user) {
@@ -1075,7 +1101,8 @@
             <h2 id="loginTitle" class="text-2xl font-bold mb-4">PLAYER LOGIN</h2>
             <p id="loginError" class="text-red-500 text-xs mb-4 h-4"></p>
             <input type="email" id="emailInput" class="game-input text-center mb-4" placeholder="Enter your email" required>
-            <input type="password" id="passwordInput" class="game-input text-center mb-6" placeholder="Enter your password" required>
+            <input type="password" id="passwordInput" class="game-input text-center mb-4" placeholder="Enter your password" required>
+            <input type="password" id="confirmPasswordInput" class="game-input text-center mb-6 hidden" placeholder="Confirm your password" required>
             <button id="loginSubmitBtn" type="submit" class="w-full game-btn game-btn-primary py-3">> LOGIN</button>
             <p id="toggleAuthMode" class="text-xs text-gray-500 dark:text-gray-400 mt-6 cursor-pointer">Need an account? <span class="underline">Register</span></p>
         </form>
