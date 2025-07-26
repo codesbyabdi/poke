@@ -600,15 +600,14 @@
                     const cachedCards = await getCardsFromDB(db);
 
                     if (cachedCards && cachedCards.length > 0) {
-                        showStatus('Loading database from cache...');
+                        // Fast path: Load from cache, no UI changes needed here.
                         console.log(`Loaded ${cachedCards.length} cards from IndexedDB.`);
                         localCardDatabase = {};
                         cachedCards.forEach(card => localCardDatabase[card.id] = card);
-                        showStatus(''); // Clear status on success
                         return;
                     }
                     
-                    searchControls.classList.add('hidden');
+                    // Slow path: Show progress bar and fetch from network.
                     progressBarContainer.classList.remove('hidden');
                     console.log("Card cache is empty or outdated, fetching from network...");
 
@@ -1051,9 +1050,18 @@
                 showSetsBtn.disabled = false;
                 showWantsBtn.disabled = false;
                 
+                // --- Set a clean loading state ---
+                searchControls.classList.add('hidden');
+                statusDisplay.classList.add('hidden');
+
                 await syncLocalDatabases(); 
 
-                searchInput.disabled = false;
+                // --- Restore UI after sync ---
+                progressBarContainer.classList.add('hidden');
+                searchControls.classList.remove('hidden');
+                statusDisplay.classList.remove('hidden');
+                searchInput.placeholder = "Search Name or Pokédex Nr.";
+                
                 listenToUserData(user.uid);
                 navigateTo('search'); 
                 showStatus('Search for a card to begin!');
