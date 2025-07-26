@@ -947,6 +947,34 @@
         }
 
         main();
+        async function uploadPokemonData() {
+        console.log("Fetching local JSON file...");
+        const response = await fetch('pokemon-tcg-db.json');
+        const cards = await response.json();
+        console.log(`Found ${cards.length} cards to upload.`);
+
+        const batchSize = 500;
+        for (let i = 0; i < cards.length; i += batchSize) {
+            const batch = writeBatch(db);
+            const chunk = cards.slice(i, i + batchSize);
+
+            console.log(`Preparing batch ${Math.floor(i / batchSize) + 1}...`);
+            chunk.forEach(card => {
+                const docRef = doc(db, "cards", card.id);
+                batch.set(docRef, card);
+            });
+
+            console.log("Uploading batch...");
+            await batch.commit();
+            console.log(`Batch ${Math.floor(i / batchSize) + 1} uploaded successfully.`);
+        }
+        console.log("All data uploaded to Firestore!");
+        alert("All Pokémon card data has been successfully uploaded to your Firestore database in the 'cards' collection!");
+    }
+
+    // --- MAKE THE UPLOAD FUNCTION CALLABLE FROM CONSOLE ---
+    window.uploadPokemonData = uploadPokemonData;
+    console.log("Ready to upload. Log in, then run 'uploadPokemonData()' from the console.");
     </script>
     <style>
         html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; image-rendering: -webkit-optimize-contrast; image-rendering: pixelated; }
