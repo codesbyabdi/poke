@@ -26,6 +26,10 @@
         // Main Search
         const searchInput = document.getElementById('searchInput');
         const resultsContainer = document.getElementById('results');
+        const searchControls = document.getElementById('searchControls');
+        const progressBarContainer = document.getElementById('progressBarContainer');
+        const progressBar = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
         
         // Modals & Popups
         const imageModal = document.getElementById('imageModal');
@@ -101,6 +105,7 @@
         let localCardDatabase = {}; 
         let localSetDatabase = [];
         let isRegistering = false;
+        let isDatabaseSynced = false;
         let searchSort = { field: 'pokedex', direction: 'asc' };
         let myListSort = { field: 'pokedex', direction: 'asc' };
         let currentFilter = { type: 'all', value: null };
@@ -603,18 +608,57 @@
                         return;
                     }
                     
-                    showStatus('SYNCING DATABASE (first load might take a moment)...');
+                    searchControls.classList.add('hidden');
+                    progressBarContainer.classList.remove('hidden');
                     console.log("Card cache is empty or outdated, fetching from network...");
 
                     const response = await fetch(cardDbUrl);
                     if (!response.ok) throw new Error(`Network response not ok. Status: ${response.status}`);
-                    const dataArray = await response.json(); 
                     
+                    const APPROXIMATE_SIZE_IN_BYTES = 25000000; // ~24MB fallback
+                    let contentLength = response.headers.get('content-length');
+
+                    if (contentLength) {
+                        contentLength = parseInt(contentLength, 10);
+                    } else {
+                        contentLength = APPROXIMATE_SIZE_IN_BYTES;
+                        console.warn('Content-Length header not found. Using approximate size for progress bar.');
+                    }
+
+                    const reader = response.body.getReader();
+                    const chunks = [];
+                    let receivedLength = 0;
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        chunks.push(value);
+                        receivedLength += value.length;
+
+                        const percent = Math.round((receivedLength / contentLength) * 100);
+                        progressBar.style.width = `${percent}%`;
+                        const receivedMB = (receivedLength / (1024 * 1024)).toFixed(1);
+                        const totalMB = (contentLength / (1024 * 1024)).toFixed(1);
+                        progressText.textContent = `${receivedMB}MB / ${totalMB}MB (${percent}%)`;
+                    }
+
+                    const chunksAll = new Uint8Array(receivedLength);
+                    let position = 0;
+                    for (const chunk of chunks) {
+                        chunksAll.set(chunk, position);
+                        position += chunk.length;
+                    }
+                    const result = new TextDecoder("utf-8").decode(chunksAll);
+                    const dataArray = JSON.parse(result);
+
                     console.log(`Fetched ${dataArray.length} cards, saving to cache...`);
                     await saveCardsToDB(db, dataArray);
                     
                     localCardDatabase = {};
                     dataArray.forEach(card => localCardDatabase[card.id] = card);
+                    
+                    searchControls.classList.remove('hidden');
+                    progressBarContainer.classList.add('hidden');
 
                 } catch (error) { 
                     showStatus(`DB SYNC FAILED: ${error.message}`, true); 
@@ -1006,11 +1050,10 @@
                 showListBtn.disabled = false;
                 showSetsBtn.disabled = false;
                 showWantsBtn.disabled = false;
-                searchInput.disabled = true;
-                searchInput.placeholder = "Loading database...";
+                
                 await syncLocalDatabases(); 
+
                 searchInput.disabled = false;
-                searchInput.placeholder = "Search Name or Pokédex Nr.";
                 listenToUserData(user.uid);
                 navigateTo('search'); 
                 showStatus('Search for a card to begin!');
@@ -1260,9 +1303,9 @@
                     </div>
                 </div>
 
-                <div class="max-w-2xl mx-auto mb-4 flex flex-col md:flex-row gap-4 items-center">
+                <div id="searchControls" class="max-w-2xl mx-auto mb-4 flex flex-col md:flex-row gap-4 items-center">
                     <div id="autocomplete-container" class="flex-grow w-full relative">
-                        <input type="text" id="searchInput" class="game-input text-center w-full" placeholder="Loading...">
+                        <input type="text" id="searchInput" class="game-input text-center w-full" placeholder="Search Name or Pokédex Nr.">
                         <div id="autocomplete-results" class="hidden"></div>
                     </div>
                     <div class="flex gap-2 items-center">
@@ -1272,6 +1315,12 @@
                     </div>
                 </div>
                 <div id="statusDisplay" class="text-center text-gray-500 dark:text-gray-400 text-xs py-2"></div>
+                <div id="progressBarContainer" class="hidden w-full max-w-md mx-auto my-4">
+                    <div class="progress-container">
+                        <div id="progressBar" class="progress-bar-inner" style="width: 0%; transition: width 0.2s ease-in-out;"></div>
+                    </div>
+                    <div id="progressText" class="text-center text-xs mt-1 font-bold">0%</div>
+                </div>
                 <main id="results" class="gap-4"></main>
             </div>
         </div>
