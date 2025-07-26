@@ -838,6 +838,8 @@
             toggleAuthMode.innerHTML = isRegister ? 'Have an account? <span class="underline">Login</span>' : 'Need an account? <span class="underline">Register</span>';
             
             confirmPasswordInput.classList.toggle('hidden', !isRegister);
+            confirmPasswordInput.required = isRegister;
+
             passwordInput.classList.toggle('mb-6', !isRegister);
             passwordInput.classList.toggle('mb-4', isRegister);
             if (!isRegister) {
